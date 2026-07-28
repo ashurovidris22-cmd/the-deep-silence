@@ -228,7 +228,15 @@ export class Pilot {
     const p = this.pos.clone().sub(this.walkOrigin);
 
     const fwd = new THREE.Vector3(Math.sin(this.yaw), 0, -Math.cos(this.yaw));
-    const right = new THREE.Vector3(fwd.z, 0, -fwd.x);
+    /* Derived by cross product, exactly as the swim path does it.
+     *
+     * This was hand-written as (fwd.z, 0, -fwd.x), which is the negative of
+     * cross(fwd, up) = (-fwd.z, 0, fwd.x) — so A and D were swapped, and only
+     * while walking. Two movement paths that disagree about which way is right is
+     * worse than either being wrong, because the error appears and disappears as
+     * the player changes mode and reads as the game being broken rather than as
+     * a control preference. Compute it; never transcribe it. */
+    const right = new THREE.Vector3().crossVectors(fwd, UP).normalize();
     const wish = new THREE.Vector3();
     if (k.has('KeyW')) wish.add(fwd);
     if (k.has('KeyS')) wish.sub(fwd);
