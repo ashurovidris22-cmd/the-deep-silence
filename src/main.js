@@ -5,7 +5,7 @@ import { buildKelp, buildRocks } from './props.js';
 import { buildSnow } from './snow.js';
 import { buildStation } from './structures.js';
 import { buildSub } from './sub.js';
-import { buildInterior, hullHalfWidth, DECK_Y, EYE, HULL_LEN, HELM } from './interior.js';
+import { buildInterior, interiorSolids, hullHalfWidth, DECK_Y, EYE, HULL_LEN, HELM } from './interior.js';
 import { Post } from './post.js';
 import { Pilot } from './controls.js';
 import { FS_VERT, WATER } from './glsl.js';
@@ -249,7 +249,8 @@ function enterWalk() {
   pilot.walkBounds = hullHalfWidth;
   pilot.deckY = DECK_Y;
   pilot.eyeH = EYE;
-  pilot.halfLen = HULL_LEN - 0.5;
+  pilot.halfLen = HULL_LEN - 1.1;
+  pilot.solids = interiorSolids();
   pilot.vy = 0;
   pilot.pos.copy(boat.origin).add(new THREE.Vector3(0, DECK_Y + EYE, 0.5));
   pilot.pitch = 0;
@@ -268,14 +269,33 @@ function enterHelm() {
   pilot.yaw = Math.PI; pilot.pitch = -0.04;
   pilot.apply();
 }
+/* Leaving is done at the hatch, and it puts you just outside it.
+ *
+ * Previously V teleported the player to an arbitrary offset from anywhere in the
+ * boat, into open water, with the full swim controls live and a four-hundred-metre
+ * water column overhead. Held Space long enough and you arrive at the six-metre
+ * ceiling with no idea what happened — which is exactly what happened. An exit
+ * that only works at a modelled hatch, and lands you on top of your own hull, is
+ * both harder to trigger by accident and tells you where you came from. */
+const HATCH = new THREE.Vector3(0, 0, -1.5);
+function nearHatch() {
+  const p = pilot.pos.clone().sub(boat.origin);
+  return Math.abs(p.x - HATCH.x) < 1.0 && Math.abs(p.z - HATCH.z) < 1.1;
+}
 function enterSwim() {
   game.mode = 'swim';
   pilot.walk = false;
   pilot.enabled = true;
-  pilot.pos.copy(boat.origin).add(new THREE.Vector3(6.5, 1.2, 2.0));
+  pilot.pos.copy(boat.origin).add(new THREE.Vector3(0, 3.4, -1.5));
+  pilot.vel.set(0, 0, 0);
+  pilot.pitch = -0.15;
   pilot.apply();
 }
-pilot.toggleMode = () => (game.mode === 'swim' ? enterWalk() : enterSwim());
+pilot.toggleMode = () => {
+  if (game.mode === 'swim') { enterWalk(); return; }
+  // Only from under the hatch. Anywhere else, say so rather than doing nothing.
+  if (game.mode === 'walk' && nearHatch()) enterSwim();
+};
 pilot.interact = () => {
   if (game.mode === 'helm') { enterWalk(); pilot.enabled = true; return; }
   if (game.mode !== 'walk') return;
@@ -679,6 +699,39 @@ function frame() {
   game.frames++; fpsN++; fpsT += dt;
   if (fpsT >= 0.5) { game.fps = fpsN / fpsT; fpsN = 0; fpsT = 0; }
 
+  /* Tell the player what is possible, where they are standing.
+   *
+   * Without this the boat is a set of rooms with no verbs in them: a pilot's seat
+   * and a blank wall look identical, and nothing on screen suggests that E exists.
+   * The prompt is the difference between an interior and a place you can use. */
+  const prompt = document.getElementById('prompt');
+  const ptext = document.getElementById('promptText');
+  let pmsg = null;
+  if (game.mode === 'helm') pmsg = 'Stand up';
+  else if (game.mode === 'walk') {
+    const lp = pilot.pos.clone().sub(boat.origin);
+    if (lp.z > HELM.z - 2.4 && Math.abs(lp.x) < 1.1) pmsg = 'Take the helm';
+    else if (nearHatch()) pmsg = 'V — go outside through the hatch';
+  } else if (game.mode === 'swim') {
+    const d = pilot.pos.distanceTo(boat.origin);
+    if (d < 9) pmsg = 'V — back inside';
+  }
+  if (pmsg) { ptext.textContent = pmsg; prompt.hidden = false; } else prompt.hidden = true;
+
+  const legend = document.getElementById('legend');
+  if (!legend.hidden) {
+    const rows = game.mode === 'helm'
+      ? [['Mouse', 'look'], ['E', 'stand up'], ['L', 'lamp']]
+      : game.mode === 'walk'
+        ? [['W A S D', 'walk'], ['Mouse', 'look'], ['Space', 'step up'],
+           ['E', 'use'], ['V', 'exit at hatch'], ['L', 'lamp']]
+        : [['W A S D', 'thrust'], ['Space / C', 'rise / sink'], ['Shift', 'transit'],
+           ['V', 'back inside'], ['L', 'lamp'], ['H', 'hide this']];
+    const html = rows.map(([k, v]) => `<div><b>${k}</b>${v}</div>`).join('');
+    if (legend.dataset.sig !== html) { legend.dataset.sig = html;
+      document.getElementById('legBody').innerHTML = html; }
+  }
+
   const hud = document.getElementById('hud');
   if (!hud.hidden) {
     document.getElementById('hDepth').textContent = Math.round(game.depth);
@@ -699,6 +752,12 @@ function begin() {
   document.getElementById('boot').style.opacity = '0';
   setTimeout(() => { document.getElementById('boot').style.display = 'none'; }, 950);
   if (qStr('hud', '1') === '1') document.getElementById('hud').hidden = false;
+  window.addEventListener('keydown', (e) => {
+    if (e.code === 'KeyH') {
+      const l = document.getElementById('legend');
+      l.hidden = !l.hidden;
+    }
+  });
   if (qStr('stats', '0') === '1') document.getElementById('stats').hidden = false;
   game.started = true;
   clock.getDelta();

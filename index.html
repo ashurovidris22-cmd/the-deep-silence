@@ -65,6 +65,32 @@
     text-align:right; white-space:pre; pointer-events:none;
   }
   #stats[hidden] { display:none; }
+
+  #legend {
+    position:fixed; left:22px; top:20px; z-index:5; pointer-events:none;
+    font:400 10px/1.9 ui-monospace,monospace; letter-spacing:.18em;
+    color:rgba(150,205,215,.44); text-transform:uppercase;
+    text-shadow:0 1px 10px rgba(0,0,0,.95);
+  }
+  #legTitle { color:rgba(180,225,235,.6); margin-bottom:5px; letter-spacing:.3em; }
+  #legend b { display:inline-block; min-width:74px; font-weight:400;
+              color:rgba(195,235,245,.82); }
+  #legend[hidden] { display:none; }
+
+  #prompt {
+    position:fixed; left:50%; bottom:19%; transform:translateX(-50%); z-index:6;
+    display:flex; align-items:center; gap:11px; pointer-events:none;
+    padding:9px 18px; border:1px solid rgba(159,211,221,.22); border-radius:2px;
+    background:rgba(4,12,16,.42);
+    font:400 12px/1 ui-monospace,monospace; letter-spacing:.22em;
+    color:rgba(205,240,248,.92); text-transform:uppercase;
+    text-shadow:0 1px 10px rgba(0,0,0,.9);
+  }
+  #prompt kbd {
+    padding:3px 8px; border:1px solid rgba(159,211,221,.42); border-radius:2px;
+    color:rgba(225,248,255,.98);
+  }
+  #prompt[hidden] { display:none; }
 </style>
 </head>
 <body>
@@ -76,6 +102,18 @@
   <div style="text-align:right"><span class="u">Pressure</span><b id="hHull">1</b><span class="u">atmospheres</span></div>
 </div>
 <div id="stats" hidden></div>
+
+<!-- Always on screen. A control scheme that only appears on the loading card is
+     a control scheme the player has already forgotten. -->
+<div id="legend">
+  <div id="legTitle">Controls</div>
+  <div id="legBody"></div>
+</div>
+
+<!-- Contextual prompt. The single most important piece of UI in the build: with
+     no prompt, standing next to a pilot's seat looks exactly like standing next
+     to a wall, and the player has no way to learn that E does anything. -->
+<div id="prompt" hidden><kbd>E</kbd><span id="promptText"></span></div>
 
 <div id="boot">
   <h1>The Deep Silence</h1>

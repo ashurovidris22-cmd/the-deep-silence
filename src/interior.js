@@ -231,6 +231,45 @@ function bulkhead(W, z, doorW = 0.82, doorH = 1.95) {
   }
 }
 
+/* Solid volumes, in hull-local space.
+ *
+ * The first version collided with exactly two things: the deck, and the curve of
+ * the hull. Everything else — both bulkheads, every locker, the console, the seat
+ * — was scenery you walked straight through, which is worse than having no
+ * furniture at all: it tells the player the room is a painting.
+ *
+ * Boxes rather than the real triangles, on purpose. A mesh collider against
+ * twenty-three thousand triangles for a walking player is a great deal of work
+ * to arrive at the same answer a dozen boxes give, and the boxes can be derived
+ * from the same constants that place the geometry, so they cannot drift out of
+ * agreement with what is drawn. */
+export function interiorSolids() {
+  const s = [];
+  const box = (x, y, z, sx, sy, sz) => s.push({
+    min: [x - sx / 2, y - sy / 2, z - sz / 2],
+    max: [x + sx / 2, y + sy / 2, z + sz / 2],
+  });
+
+  // Bulkheads: two cheeks and a lintel, leaving the doorway open.
+  for (const z of [-2.6, 4.4]) {
+    const doorW = 0.82, doorH = 1.95;
+    box(-1.55, DECK_Y + 1.4, z, 2.0, 2.8, 0.30);
+    box(1.55, DECK_Y + 1.4, z, 2.0, 2.8, 0.30);
+    box(0, DECK_Y + doorH + 0.45, z, doorW + 0.4, 0.9, 0.30);
+  }
+  // Lockers down both sides.
+  for (const side of [-1, 1]) {
+    for (const z of [-6.6, -5.0, 0.6, 2.2]) box(side * 1.62, DECK_Y + 0.62, z, 0.46, 1.30, 1.20);
+  }
+  // Helm console, its front, and the seat.
+  box(0, DECK_Y + 0.78, 7.55, 2.05, 0.20, 0.76);
+  box(0, DECK_Y + 0.40, 7.86, 2.05, 0.84, 0.18);
+  box(0, DECK_Y + 0.30, 6.55, 0.66, 0.70, 0.62);
+  // Ladder well: stops you standing in the rungs.
+  box(0, DECK_Y + 1.0, -1.5, 0.62, 2.2, 0.20);
+  return s;
+}
+
 export function buildInterior() {
   const W = new Welder();
 

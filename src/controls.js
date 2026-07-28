@@ -64,6 +64,7 @@ export class Pilot {
     this.walkSpeed = 3.1;
     this.grounded = false;
     this.vy = 0;
+    this.solids = [];
 
     // Depth band. Moving vertically inside the scene changes depth by metres;
     // this lets you change it by kilometres, which is the only way to see the
@@ -258,6 +259,41 @@ export class Pilot {
     const hw = this.walkBounds ? this.walkBounds(p.z, p.y - 0.9) : 1.9;
     const lim = Math.max(0.25, hw - 0.34);
     p.x = Math.max(-lim, Math.min(lim, p.x));
+
+    /* Push out of the furniture, along the shallowest axis.
+     *
+     * Resolving on the axis of least penetration is what makes this feel like
+     * bumping a locker rather than being grabbed by it: walk into a face and you
+     * stop, clip a corner and you slide off it. Vertical overlaps resolve upward
+     * only when the box is low enough to be a step, so a console stops you but a
+     * coaming is something you walk over. */
+    const R = 0.34, H = this.eyeH;
+    for (const b of this.solids) {
+      const cx = Math.max(b.min[0], Math.min(p.x, b.max[0]));
+      const cz = Math.max(b.min[2], Math.min(p.z, b.max[2]));
+      const dx = p.x - cx, dz = p.z - cz;
+      const horiz = Math.hypot(dx, dz);
+      const feetY = p.y - H;
+      // Only collide if the body's vertical span overlaps the box at all.
+      if (feetY > b.max[1] - 0.02 || feetY + H < b.min[1]) continue;
+      if (horiz >= R) continue;
+
+      // Low enough to step onto? Then stand on it instead of being blocked.
+      if (b.max[1] - feetY < 0.42 && this.vy <= 0.01) {
+        p.y = b.max[1] + H; this.vy = 0; this.grounded = true;
+        continue;
+      }
+      if (horiz > 1e-4) {
+        const push = (R - horiz) / horiz;
+        p.x += dx * push; p.z += dz * push;
+      } else {
+        // Dead centre of a box: eject along the shallowest face.
+        const ox = Math.min(p.x - b.min[0], b.max[0] - p.x);
+        const oz = Math.min(p.z - b.min[2], b.max[2] - p.z);
+        if (ox < oz) p.x += (p.x < (b.min[0] + b.max[0]) / 2 ? -1 : 1) * (ox + R);
+        else p.z += (p.z < (b.min[2] + b.max[2]) / 2 ? -1 : 1) * (oz + R);
+      }
+    }
 
     this.pos.copy(p).add(this.walkOrigin);
     this.vel.set(wish.x * spd, this.vy, wish.z * spd);
