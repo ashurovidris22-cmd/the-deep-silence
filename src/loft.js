@@ -74,6 +74,7 @@ function norm3(v) {
  */
 export function loftInto(W, stations, {
   count = 18, mat = 0, wear = 0.5, recess = null, capBow = true, capStern = true,
+  facet = false,
 } = {}) {
   const S = stations.length;
 
@@ -127,6 +128,31 @@ export function loftInto(W, stations, {
     }
   }
 
+  /* 2b. Smooth around the section as well, unless faceting is asked for.
+   *
+   * The first version faceted around on the theory that this is what rolled plate
+   * looks like. That reasoning was wrong for a pressure hull, and the result was
+   * measurably so: twenty segments on a 2.5 m hull is a 39 cm facet, which at six
+   * metres is fifty-seven pixels wide. Flat-shaded fifty-seven-pixel facets are
+   * the definition of the cartoon low-poly look, and no material hides them.
+   *
+   * A pressure vessel is rolled and then faired smooth, precisely because a
+   * crease is a stress riser — real ones have no facets to find. So the plating
+   * has to be read from the welds, which the shader already draws from the loft's
+   * own UVs, rather than from the silhouette. Geometry carries the form; the
+   * material carries the construction. */
+  const VN = NS;
+  if (!facet) {
+    for (let j = 0; j < S; j++) {
+      const row = [];
+      for (let i = 0; i < count; i++) {
+        const a = NS[j][(i - 1 + count) % count], b = NS[j][i];
+        row.push(norm3([a[0] + b[0], a[1] + b[1], a[2] + b[2]]));
+      }
+      VN[j] = row;
+    }
+  }
+
   // 3. Bridge consecutive rings. Each strip gets its own vertices so the plate
   //    edges stay crisp.
   const zTotal = Math.abs(stations[S - 1].z - stations[0].z) || 1;
@@ -138,10 +164,14 @@ export function loftInto(W, stations, {
       const v1 = Math.abs(stations[j + 1].z - stations[0].z) / zTotal;
       const base = W.v;
       const put = (pt, n, u, v) => W._push(pt[0], pt[1], pt[2], n[0], n[1], n[2], mat, wear, u, v);
-      put(P[j][i], NS[j][i], u0 * 6.0, v0 * zTotal);
-      put(P[j][i1], NS[j][i], u1 * 6.0, v0 * zTotal);
-      put(P[j + 1][i1], NS[j + 1][i], u1 * 6.0, v1 * zTotal);
-      put(P[j + 1][i], NS[j + 1][i], u0 * 6.0, v1 * zTotal);
+      const nA = facet ? NS[j][i] : VN[j][i];
+      const nB = facet ? NS[j][i] : VN[j][(i + 1) % count];
+      const nC = facet ? NS[j + 1][i] : VN[j + 1][(i + 1) % count];
+      const nD = facet ? NS[j + 1][i] : VN[j + 1][i];
+      put(P[j][i], nA, u0 * 6.0, v0 * zTotal);
+      put(P[j][i1], nB, u1 * 6.0, v0 * zTotal);
+      put(P[j + 1][i1], nC, u1 * 6.0, v1 * zTotal);
+      put(P[j + 1][i], nD, u0 * 6.0, v1 * zTotal);
       W.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
     }
   }

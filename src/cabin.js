@@ -235,14 +235,14 @@ export function buildCabin() {
   const R = 0.325;          // clear aperture of the port
 
   // Front bulkhead: a plate with the port cut out of it.
-  annulus(W, Z, R, 1.5, 40, P_SHELL, 0.55, 1);
+  annulus(W, Z, R, 1.5, 96, P_SHELL, 0.55, 1);
 
   /* Port assembly: the aperture ring, then the acrylic thickness behind it, then
    * the retaining flange. Built as three concentric rings so the port reads as an
    * assembly with depth rather than a hole in a wall. */
-  W.tube(0, 0, Z, 0, 0, Z + 0.055, R, 44, P_ACRYL, 0.3);
-  W.tube(0, 0, Z + 0.055, 0, 0, Z + 0.075, R + 0.012, 44, P_TRIM, 0.5);
-  annulus(W, Z + 0.075, R + 0.012, R + 0.085, 40, P_TRIM, 0.5, 1);
+  W.tube(0, 0, Z, 0, 0, Z + 0.055, R, 96, P_ACRYL, 0.3);
+  W.tube(0, 0, Z + 0.055, 0, 0, Z + 0.075, R + 0.012, 96, P_TRIM, 0.5);
+  annulus(W, Z + 0.075, R + 0.012, R + 0.085, 96, P_TRIM, 0.5, 1);
   // Retaining bolts around the flange.
 /* Bolts sit down on the flange, not out in front of it.
    *
@@ -297,7 +297,7 @@ export function buildCabin() {
       W.idx.push(c, v0, v1);
     }
     // Bezel.
-    W.tube(gx, y + 0.012, z + 0.010, gx, y + 0.014, z + 0.024, r * 1.10, 24, P_TRIM, 0.5);
+    W.tube(gx, y + 0.012, z + 0.010, gx, y + 0.014, z + 0.024, r * 1.10, 40, P_TRIM, 0.5);
   };
   gaugeAt(-0.235, 0.072);
   gaugeAt(0.0, 0.086);
@@ -315,8 +315,8 @@ export function buildCabin() {
 
   /* Overhead: the one working lamp housing, and the alarm beside it. Modelled
    * because the light has to come from something the player can see. */
-  W.tube(0, 0.455, -0.06, 0, 0.455, -0.16, 0.048, 14, P_TRIM, 0.5);
-  W.tube(0, 0.40, 0.26, 0, 0.40, 0.34, 0.038, 12, P_TRIM, 0.6);
+  W.tube(0, 0.455, -0.06, 0, 0.455, -0.16, 0.048, 24, P_TRIM, 0.5);
+  W.tube(0, 0.40, 0.26, 0, 0.40, 0.34, 0.038, 22, P_TRIM, 0.6);
 
   /* Ribs. Curved, following the pressure hull's section, which is what makes the
    * cabin feel like the inside of a cylinder rather than a room. */
@@ -328,10 +328,10 @@ export function buildCabin() {
       const y = Math.sin(a) * rr;
       const x2 = side * Math.cos(a + 0.2) * rr * 0.92;
       const y2 = Math.sin(a + 0.2) * rr;
-      W.tube(x, y, Z + 0.06, x2, y2, Z + 0.06, 0.026, 6, P_TRIM, 0.55);
+      W.tube(x, y, Z + 0.06, x2, y2, Z + 0.06, 0.026, 20, P_TRIM, 0.55);
     }
     // Longitudinal stringer running back past the pilot.
-    W.tube(side * 0.60, 0.30, Z + 0.05, side * 0.66, 0.26, 0.55, 0.030, 6, P_TRIM, 0.6);
+    W.tube(side * 0.60, 0.30, Z + 0.05, side * 0.66, 0.26, 0.55, 0.030, 20, P_TRIM, 0.6);
   }
 
   const mesh = new THREE.Mesh(W.geometry(), cabinMaterial());

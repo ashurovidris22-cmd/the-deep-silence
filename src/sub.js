@@ -40,16 +40,30 @@ export function buildSub(seed = SEEDS.debris ^ 0x51) {
 
   /* Six control stations, stern to bow. The exponent sweep is the point: it does
    * the work that a chain of primitives cannot. */
+/* Ends taper to a point rather than being capped flat.
+   *
+   * loftInto() closes an open end with a flat fan, and on a bow 0.62 m across
+   * that is a visible disc stuck on the nose. Two extra stations shrinking to
+   * almost nothing let the skin close itself, so the nose is a real rounded form
+   * and the cap that remains is a few millimetres wide. */
   const control = [
+    { z: -5.05, x: 0, y: 0.00, w: 0.10, h: 0.10, sq: 2.2 },
     { z: -4.6, x: 0, y: 0.00, w: 0.85, h: 0.85, sq: 3.3 },
     { z: -3.1, x: 0, y: 0.05, w: 2.00, h: 1.85, sq: 3.0 },
     { z: -0.9, x: 0, y: 0.10, w: 2.52, h: 2.28, sq: 2.6 },
     { z: 1.3, x: 0, y: 0.12, w: 2.50, h: 2.34, sq: 2.3 },
     { z: 3.2, x: 0, y: 0.06, w: 1.96, h: 1.88, sq: 2.0 },
     { z: 4.7, x: 0, y: -0.02, w: 0.62, h: 0.60, sq: 1.7 },
+    { z: 5.18, x: 0, y: -0.03, w: 0.09, h: 0.09, sq: 1.5 },
   ];
-  loftInto(W, fairStations(control, 30), {
-    count: 20, mat: MAT.HULL, wear: 0.72, recess: hullRecess,
+  /* Sixty-four around, fifty-six along. Measured, not guessed: twenty segments
+   * on this diameter is a 39 cm facet and fifty-seven pixels across at six
+   * metres; sixty-four brings it to twelve centimetres and eighteen pixels, and
+   * with smooth normals it reads as a curve. The whole hull is still under eight
+   * thousand triangles — the previous version was not low-poly for any budgetary
+   * reason, it was low-poly by oversight. */
+  loftInto(W, fairStations(control, 56), {
+    count: 64, mat: MAT.HULL, wear: 0.72, recess: hullRecess,
   });
 
   /* Conning fairing, lofted too. A box here would undo the whole exercise — the
@@ -60,14 +74,14 @@ export function buildSub(seed = SEEDS.debris ^ 0x51) {
     { z: 0.6, x: 0, y: 1.32, w: 1.30, h: 1.02, sq: 3.0 },
     { z: 1.6, x: 0, y: 1.10, w: 0.60, h: 0.54, sq: 2.2 },
   ];
-  loftInto(W, fairStations(sail, 16), { count: 14, mat: MAT.HULL, wear: 0.6 });
+  loftInto(W, fairStations(sail, 26), { count: 40, mat: MAT.HULL, wear: 0.6 });
 
   // Viewport surround at the bow: a proud ring, then the port itself set back.
-  W.tube(0, 0.02, 4.16, 0, 0.02, 4.36, 0.46, 18, MAT.STEEL, 0.55);
-  W.tube(0, 0.02, 4.30, 0, 0.02, 4.33, 0.40, 18, MAT.GLASS, 0.2);
+  W.tube(0, 0.02, 4.16, 0, 0.02, 4.36, 0.46, 44, MAT.STEEL, 0.55);
+  W.tube(0, 0.02, 4.30, 0, 0.02, 4.33, 0.40, 44, MAT.GLASS, 0.2);
 
   // Thruster shroud at the stern, and the stator vanes inside it.
-  W.tube(0, 0.0, -4.9, 0, 0.0, -4.35, 0.62, 16, MAT.PIPE, 0.8);
+  W.tube(0, 0.0, -4.9, 0, 0.0, -4.35, 0.62, 48, MAT.PIPE, 0.8);
   for (let i = 0; i < 5; i++) {
     const a = (i / 5) * Math.PI * 2;
     W.box(Math.cos(a) * 0.3, Math.sin(a) * 0.3, -4.62, 0.06, 0.52, 0.34, a, MAT.STEEL, 0.85);
@@ -75,22 +89,22 @@ export function buildSub(seed = SEEDS.debris ^ 0x51) {
 
   // Skids, and the frames that carry them.
   for (const side of [-1, 1]) {
-    W.tube(side * 0.95, -1.28, -3.2, side * 0.95, -1.28, 3.4, 0.09, 8, MAT.PIPE, 0.8);
+    W.tube(side * 0.95, -1.28, -3.2, side * 0.95, -1.28, 3.4, 0.09, 16, MAT.PIPE, 0.8);
     for (const z of [-2.6, -0.6, 1.4, 3.0]) {
-      W.tube(side * 0.78, -0.95, z, side * 0.95, -1.28, z, 0.06, 6, MAT.PIPE, 0.85);
+      W.tube(side * 0.78, -0.95, z, side * 0.95, -1.28, z, 0.06, 12, MAT.PIPE, 0.85);
     }
   }
 
   // Lamp housings on the bow shoulders, dark and dead.
   for (const side of [-1, 1]) {
-    W.tube(side * 0.72, 0.42, 3.5, side * 0.86, 0.46, 3.95, 0.17, 10, MAT.STEEL, 0.7);
+    W.tube(side * 0.72, 0.42, 3.5, side * 0.86, 0.46, 3.95, 0.17, 22, MAT.STEEL, 0.7);
   }
 
   // Grab rails along the deck: small, and the only straight lines on the thing,
   // which is exactly why they sell its scale.
   for (const side of [-1, 1]) {
     for (const z of [-2.2, -0.2, 1.8]) {
-      W.tube(side * 0.62, 1.02, z - 0.4, side * 0.62, 1.02, z + 0.4, 0.032, 5, MAT.PIPE, 0.85);
+      W.tube(side * 0.62, 1.02, z - 0.4, side * 0.62, 1.02, z + 0.4, 0.032, 12, MAT.PIPE, 0.85);
     }
   }
 
