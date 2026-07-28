@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { NOISE, WATER } from './glsl.js';
 import { seabedHeight } from './terrain.js';
+import { rng, SEEDS } from './rng.js';
 
 /* Silhouette layer.
  *
@@ -53,7 +54,8 @@ function blocked(clear, x, z) {
 }
 
 /** Kelp: tall tapered blades in clumps, swaying on a long period. */
-export function buildKelp(clumps = 300, radius = 55, clear = []) {
+export function buildKelp(clumps = 300, radius = 55, clear = [], seed = SEEDS.kelp) {
+  const rand = rng(seed);
   const SEG = 9;
   const base = new THREE.PlaneGeometry(1, 1, 1, SEG);
   base.translate(0, 0.5, 0); // root at origin so scaling grows upward
@@ -63,24 +65,42 @@ export function buildKelp(clumps = 300, radius = 55, clear = []) {
   geo.attributes.position = base.attributes.position;
   geo.attributes.uv = base.attributes.uv;
 
+  /* Jittered grid, not uniform-random scatter.
+   *
+   * Uniform random over a disc gives uniform *expected* density and, at these
+   * counts, wildly non-uniform actual density: it clusters in some places and
+   * leaves bare patches elsewhere. That is fine for gravel and fatal for the
+   * thing the composition depends on — with the placement seeded and therefore
+   * finally reproducible, the bald patch turned out to sit exactly where the
+   * hero camera stands, so the establishing shot was empty water every time.
+   * Earlier runs that looked full were unseeded, and simply lucky.
+   *
+   * One clump per grid cell, jittered inside it, is a two-line Poisson
+   * approximation: no clusters, no gaps, still organic. Vegetation wants this
+   * anyway — real kelp competes for holdfast space and ends up roughly evenly
+   * spaced for exactly the same reason. */
   const blades = [];
-  for (let c = 0; c < clumps; c++) {
-    const a = Math.random() * Math.PI * 2;
-    const r = Math.sqrt(Math.random()) * radius;
-    const cx = Math.cos(a) * r, cz = Math.sin(a) * r;
-    const n = 9 + ((Math.random() * 18) | 0);
+  const cell = Math.sqrt((Math.PI * radius * radius) / clumps);
+  const half = Math.ceil(radius / cell);
+  for (let gx = -half; gx <= half; gx++) {
+    for (let gz = -half; gz <= half; gz++) {
+      const cx = (gx + (rand() - 0.5) * 0.85) * cell;
+      const cz = (gz + (rand() - 0.5) * 0.85) * cell;
+      if (cx * cx + cz * cz > radius * radius) continue;
+      const n = 9 + ((rand() * 18) | 0);
     for (let i = 0; i < n; i++) {
-      const ox = cx + (Math.random() - 0.5) * 3.4;
-      const oz = cz + (Math.random() - 0.5) * 3.4;
+      const ox = cx + (rand() - 0.5) * 3.4;
+      const oz = cz + (rand() - 0.5) * 3.4;
       if (blocked(clear, ox, oz)) continue;
       blades.push({
         x: ox, y: seabedHeight(ox, oz) - 0.25, z: oz,
-        w: 0.16 + Math.random() * 0.34,
-        h: 1.5 + Math.pow(Math.random(), 0.8) * 5.4,
-        yaw: Math.random() * Math.PI * 2,
-        phase: Math.random() * 100,
-        tint: Math.random(),
+        w: 0.16 + rand() * 0.34,
+        h: 1.5 + Math.pow(rand(), 0.8) * 5.4,
+        yaw: rand() * Math.PI * 2,
+        phase: rand() * 100,
+        tint: rand(),
       });
+      }
     }
   }
 
@@ -182,7 +202,8 @@ export function buildKelp(clumps = 300, radius = 55, clear = []) {
 }
 
 /** Rocks / boulders. Deformed once on the CPU, varied by instance transform. */
-export function buildRocks(count = 440, radius = 72, clear = []) {
+export function buildRocks(count = 440, radius = 72, clear = [], seed = SEEDS.rocks) {
+  const rand = rng(seed);
   const base = new THREE.IcosahedronGeometry(1, 2);
   const p = base.attributes.position;
   for (let i = 0; i < p.count; i++) {
@@ -204,22 +225,22 @@ export function buildRocks(count = 440, radius = 72, clear = []) {
   const aYaw = new Float32Array(count), aTint = new Float32Array(count);
   let n = 0;
   for (let i = 0; i < count * 3 && n < count; i++) {
-    const a = Math.random() * Math.PI * 2;
-    const r = Math.sqrt(Math.random()) * radius;
+    const a = rand() * Math.PI * 2;
+    const r = Math.sqrt(rand()) * radius;
     const x = Math.cos(a) * r, z = Math.sin(a) * r;
     // Heavy tail, but capped. The old max of 5.2 m meant one instance in a
     // hundred was larger than the entire visible range and read as a wall.
-    const s = 0.30 + Math.pow(Math.random(), 2.8) * 2.3;
+    const s = 0.30 + Math.pow(rand(), 2.8) * 2.3;
     // Clearance scales with the boulder: a big one has to stand further off.
     if (blocked(clear.map((c) => ({ ...c, r: c.r + s })), x, z)) continue;
     aPos[n * 3] = x;
     aPos[n * 3 + 1] = seabedHeight(x, z) - s * 0.30; // bedded in, not resting on
     aPos[n * 3 + 2] = z;
-    aScl[n * 3] = s * (0.8 + Math.random() * 0.5);
-    aScl[n * 3 + 1] = s * (0.6 + Math.random() * 0.4);
-    aScl[n * 3 + 2] = s * (0.8 + Math.random() * 0.5);
-    aYaw[n] = Math.random() * Math.PI * 2;
-    aTint[n] = Math.random();
+    aScl[n * 3] = s * (0.8 + rand() * 0.5);
+    aScl[n * 3 + 1] = s * (0.6 + rand() * 0.4);
+    aScl[n * 3 + 2] = s * (0.8 + rand() * 0.5);
+    aYaw[n] = rand() * Math.PI * 2;
+    aTint[n] = rand();
     n++;
   }
   count = n;

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { NOISE, WATER } from './glsl.js';
+import { rng, SEEDS } from './rng.js';
 
 /* Marine snow.
  *
@@ -12,23 +13,24 @@ import { NOISE, WATER } from './glsl.js';
  * Distributed in a box that follows the camera and wraps, so density is
  * constant no matter where you are and no particle is ever wasted off-screen.
  */
-export function buildSnow(count = 5200, box = 46) {
+export function buildSnow(count = 5200, box = 46, seed = SEEDS.snow) {
+  const rand = rng(seed);
   const g = new THREE.BufferGeometry();
   const pos = new Float32Array(count * 3);
-  const seed = new Float32Array(count);      // per-flake drift phase
+  const phase = new Float32Array(count);     // per-flake drift phase
   const size = new Float32Array(count);
 
   for (let i = 0; i < count; i++) {
-    pos[i * 3 + 0] = (Math.random() - 0.5) * box;
-    pos[i * 3 + 1] = (Math.random() - 0.5) * box;
-    pos[i * 3 + 2] = (Math.random() - 0.5) * box;
-    seed[i] = Math.random() * 1000;
+    pos[i * 3 + 0] = (rand() - 0.5) * box;
+    pos[i * 3 + 1] = (rand() - 0.5) * box;
+    pos[i * 3 + 2] = (rand() - 0.5) * box;
+    phase[i] = rand() * 1000;
     // Heavy tail: mostly fine detritus, a few big flocs. A uniform size
     // distribution reads as a particle system; this reads as sediment.
-    size[i] = 0.006 + Math.pow(Math.random(), 3.2) * 0.075;
+    size[i] = 0.006 + Math.pow(rand(), 3.2) * 0.075;
   }
   g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  g.setAttribute('aSeed', new THREE.BufferAttribute(seed, 1));
+  g.setAttribute('aSeed', new THREE.BufferAttribute(phase, 1));
   g.setAttribute('aSize', new THREE.BufferAttribute(size, 1));
 
   const mat = new THREE.ShaderMaterial({
