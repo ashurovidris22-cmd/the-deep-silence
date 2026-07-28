@@ -54,7 +54,7 @@ function blocked(clear, x, z) {
 }
 
 /** Kelp: tall tapered blades in clumps, swaying on a long period. */
-export function buildKelp(clumps = 300, radius = 55, clear = [], seed = SEEDS.kelp) {
+export function buildKelp(clumps = 300, radius = 55, clear = [], seed = SEEDS.kelp, accept = null, center = { x: 0, z: 0 }) {
   const rand = rng(seed);
   const SEG = 9;
   const base = new THREE.PlaneGeometry(1, 1, 1, SEG);
@@ -84,14 +84,21 @@ export function buildKelp(clumps = 300, radius = 55, clear = [], seed = SEEDS.ke
   const half = Math.ceil(radius / cell);
   for (let gx = -half; gx <= half; gx++) {
     for (let gz = -half; gz <= half; gz++) {
-      const cx = (gx + (rand() - 0.5) * 0.85) * cell;
-      const cz = (gz + (rand() - 0.5) * 0.85) * cell;
-      if (cx * cx + cz * cz > radius * radius) continue;
+      const lx = (gx + (rand() - 0.5) * 0.85) * cell;
+      const lz = (gz + (rand() - 0.5) * 0.85) * cell;
+      if (lx * lx + lz * lz > radius * radius) continue;
+      /* Offset from a centre, because the region that matters is not the origin.
+       * The kelp belongs on the shelf; the origin is the canyon floor four
+       * hundred metres down. Seeding a disc at the origin and then filtering for
+       * daylight rejected every single clump and the shelf came up bare. */
+      const cx = lx + center.x;
+      const cz = lz + center.z;
       const n = 9 + ((rand() * 18) | 0);
     for (let i = 0; i < n; i++) {
       const ox = cx + (rand() - 0.5) * 3.4;
       const oz = cz + (rand() - 0.5) * 3.4;
       if (blocked(clear, ox, oz)) continue;
+      if (accept && !accept(ox, oz)) continue;
       blades.push({
         x: ox, y: seabedHeight(ox, oz) - 0.25, z: oz,
         w: 0.16 + rand() * 0.34,
@@ -184,7 +191,7 @@ export function buildKelp(clumps = 300, radius = 55, clear = [], seed = SEEDS.ke
         float dL  = length(toL);
         vec3  L   = toL / max(dL,1e-4);
         float cone = smoothstep(uLampCos, uLampCos + uLampSoft, dot(-L, normalize(uLampDir)));
-        float atten = uLampInt / (1.0 + dL*dL*0.9);
+        float atten = uLampInt / (6.0 + dL*dL*1.0);
         float ndl = abs(dot(vN, L));
         // Thin tissue transmits — a blade lit from behind glows at the edge.
         float trans = pow(max(dot(-vN, L), 0.0), 2.0) * 0.5;
@@ -203,6 +210,19 @@ export function buildKelp(clumps = 300, radius = 55, clear = [], seed = SEEDS.ke
 
 /** Rocks / boulders. Deformed once on the CPU, varied by instance transform. */
 export function buildRocks(count = 440, radius = 72, clear = [], seed = SEEDS.rocks) {
+  /* Boulders need somewhere to rest.
+   *
+   * Dropped onto a fifty-degree canyon wall a sphere sits half in the rock and
+   * half in the water and reads as a bug, because nothing in nature balances
+   * there — scree collects at the foot of a face, not on it. Sampling the
+   * gradient and rejecting steep ground is two lines and removes the whole
+   * class of floating-rock artefacts. */
+  const slopeAt = (x, z) => {
+    const e = 2.5;
+    const dx = seabedHeight(x + e, z) - seabedHeight(x - e, z);
+    const dz = seabedHeight(x, z + e) - seabedHeight(x, z - e);
+    return Math.hypot(dx, dz) / (2 * e);
+  };
   const rand = rng(seed);
   const base = new THREE.IcosahedronGeometry(1, 2);
   const p = base.attributes.position;
@@ -233,6 +253,8 @@ export function buildRocks(count = 440, radius = 72, clear = [], seed = SEEDS.ro
     const s = 0.30 + Math.pow(rand(), 2.8) * 2.3;
     // Clearance scales with the boulder: a big one has to stand further off.
     if (blocked(clear.map((c) => ({ ...c, r: c.r + s })), x, z)) continue;
+    // tan(38 deg) ~= 0.78 — beyond that, sediment and boulders slide.
+    if (slopeAt(x, z) > 0.78) continue;
     aPos[n * 3] = x;
     aPos[n * 3 + 1] = seabedHeight(x, z) - s * 0.30; // bedded in, not resting on
     aPos[n * 3 + 2] = z;
@@ -287,7 +309,7 @@ export function buildRocks(count = 440, radius = 72, clear = [], seed = SEEDS.ro
         float dL  = length(toL);
         vec3  L   = toL / max(dL,1e-4);
         float cone = smoothstep(uLampCos, uLampCos + uLampSoft, dot(-L, normalize(uLampDir)));
-        float atten = uLampInt / (1.0 + dL*dL*0.85);
+        float atten = uLampInt / (6.0 + dL*dL*1.0);
         float ndl = max(dot(vN, L), 0.0);
         vec3 lit = alb * uLampCol * ndl * atten * cone * lampTransmit(dL);
         vec3 daylight = ambientAt(vW.y);

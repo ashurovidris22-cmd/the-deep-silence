@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { water, visibility, zoneAt, pressureAt } from './jerlov.js';
-import { buildTerrain, seabedHeight } from './terrain.js';
+import { buildTerrain, seabedHeight, isPhotic, SEA_LEVEL, CANYON_HALF, RIM } from './terrain.js';
 import { buildKelp, buildRocks } from './props.js';
 import { buildSnow } from './snow.js';
 import { Post } from './post.js';
@@ -18,7 +18,7 @@ const qStr = (k, d) => (qs.get(k) ?? d);
  * body of water and becomes two layers pretending. */
 class Env {
   constructor() {
-    this.surfaceY = 0;
+    this.surfaceY = SEA_LEVEL;
     /* Coastal, not oceanic — and this is the single most important line in the
      * file. Open ocean (Jerlov I-II) transmits blue best, so it renders as
      * sapphire. The look we are after is shelf water: dissolved organics absorb
@@ -28,7 +28,7 @@ class Env {
      * changed; changing the water type keeps it true at every depth for free. */
     this.setWater('IB', 'C1', 0.35);
     // Irradiance just below the surface, linear HDR, daylight-ish and cool.
-    this.surfaceIrr = new THREE.Vector3(8.2, 10.8, 12.4);
+    this.surfaceIrr = new THREE.Vector3(23.0, 30.0, 34.0);
     // What is left when the sun is gone: faint bio-glow and thermal seep.
     // Never zero. Pure black reads as a broken renderer, not as darkness.
     this.ambientFloor = new THREE.Vector3(0.0007, 0.0018, 0.0027);
@@ -48,8 +48,14 @@ class Env {
      * twelve metres of coastal water — about a twelfth of the green gets through
      * and essentially none of the red. A value tuned for single-path attenuation
      * leaves the whole scene a dim smudge; this is what it costs to be correct. */
-    this.lampInt = 620;
-    this.lampCos = Math.cos(0.46);
+    /* Matched to the softened falloff, not carried over from the point-source one.
+     * With the r0 term in the denominator, 210 delivered a quarter of the old
+     * mid-range light and the canyon floor went black. At 900 the light five
+     * metres out matches what it always was, while the hotspot a metre from the
+     * lens is nearly three times lower than the point-source version — which was
+     * the entire purpose of adding r0. */
+    this.lampInt = 900;
+    this.lampCos = Math.cos(0.56);
     this.lampSoft = 0.34;
 
     this.points = [];
@@ -225,6 +231,7 @@ pilot.toggleLamp = () => { game.lampOn = game.lampOn > 0.5 ? 0 : 1; syncWater();
  * verdicts must still be taken at full settings — this is for iteration speed,
  * not for making the numbers look good. */
 post.matVol.uniforms.uSteps.value = qNum('vsteps', 32);
+post.matComp.uniforms.uDofAmount.value = qNum('dof', 1.0);
 post.volScale = qNum('vscale', 0.7);
 renderer.info.autoReset = false; // post does many passes; count them all
 
@@ -235,13 +242,19 @@ scene.add(backdrop);
  * a smell — but the alternative is building props lazily after the pose table,
  * and props that rebuild on every pose change cost more than this duplication. */
 const CAM_SPOTS = [
-  { x: 4, z: 26, r: 3.0 }, { x: 0, z: 8, r: 3.0 }, { x: -6, z: 4, r: 3.0 },
-  { x: 0, z: 0, r: 3.5 }, { x: -12, z: 14, r: 3.0 }, { x: 18, z: 40, r: 3.5 },
+  { x: 442, z: 30, r: 3.2 }, { x: 366, z: 0, r: 3.5 }, { x: 232, z: 44, r: 3.5 },
+  { x: 6, z: 22, r: 3.2 }, { x: 22, z: -34, r: 3.2 }, { x: 392, z: 0, r: 4.5 },
 ];
 
 const terrain = buildTerrain();
-const kelp = buildKelp(300, 55, CAM_SPOTS);
-const rocks = buildRocks(440, 72, CAM_SPOTS);
+/* Kelp grows where light reaches, and nowhere else.
+ *
+ * This is not dressing: a photosynthetic organism on a canyon floor four hundred
+ * metres down would quietly tell the player that none of the optics mean
+ * anything. Restricting it to the shelf also gives the descent a real threshold
+ * — the vegetation thins out, then stops, and after that it is rock and silt. */
+const kelp = buildKelp(950, 150, CAM_SPOTS, undefined, isPhotic, { x: 430, z: 0 });
+const rocks = buildRocks(900, 420, CAM_SPOTS);
 const snow = buildSnow();
 scene.add(terrain, kelp, rocks, snow);
 
@@ -253,19 +266,20 @@ scene.add(terrain, kelp, rocks, snow);
  * values because that is what an actual floodlight is: a small object several
  * hundred times brighter than anything around it. The bloom pass turns that
  * into the blown disc the eye reads as "powered, and far away". */
+/* On the canyon floor, where they are the only light there is. */
 const beaconSpecs = [
-  { pos: [26, -14, -30], col: [220, 300, 330], size: 0.55 },
-  { pos: [30, -16, -33], col: [150, 200, 225], size: 0.34 },
-  { pos: [21, -19, -36], col: [260, 90, 30], size: 0.30 },   // red hazard marker
-  { pos: [-27, -17, -34], col: [40, 210, 90], size: 0.40 },  // bio / green sodium
-  { pos: [-31, -21, -39], col: [26, 150, 66], size: 0.26 },
+  { pos: [ 34, -390, -12], col: [220, 300, 330], size: 0.55 },
+  { pos: [ 38, -392, -15], col: [150, 200, 225], size: 0.34 },
+  { pos: [ 29, -394, -19], col: [260,  90,  30], size: 0.30 },  // red hazard marker
+  { pos: [-18, -393, -26], col: [ 40, 210,  90], size: 0.40 },  // bio / green sodium
+  { pos: [-22, -396, -31], col: [ 26, 150,  66], size: 0.26 },
 ];
 const beacons = buildBeacons(env, beaconSpecs);
 scene.add(beacons);
 
 env.points = [
-  { pos: new THREE.Vector3(26, -14, -30), col: new THREE.Vector3(9.0, 12.0, 13.5) },
-  { pos: new THREE.Vector3(-27, -17, -34), col: new THREE.Vector3(1.8, 8.5, 3.6) },
+  { pos: new THREE.Vector3(34, -390, -12), col: new THREE.Vector3(9.0, 12.0, 13.5) },
+  { pos: new THREE.Vector3(-18, -393, -26), col: new THREE.Vector3(1.8, 8.5, 3.6) },
 ];
 
 for (const o of [terrain, kelp, rocks, snow, backdrop]) env.register(o.material);
@@ -289,40 +303,33 @@ env.register(beacons.userData.mat);
  * yaw  degrees, 0 = -Z             pitch  degrees, + = looking up
  */
 const POSES = {
-  // Kelp against bright water. The whole absorption curve is on screen at
-  // once — near blades nearly black, mid water teal, far water dissolving.
-  kelp: { x: 4, z: 26, h: 2.2, yaw: 12, pitch: 6, depth: 38, lamp: 0.22 },
-  // Deep and nearly lightless. Proves the game can be dark without being
-  // broken: if this frame is pure black, the ambient floor is wrong.
-  /* Aimed down, because at this depth there is nothing else to aim at.
-   * With visibility at eighteen metres the lamp's useful reach is a handful of
-   * metres of doubled optical path — point it at the horizon and the frame is
-   * empty by construction, which is a badly chosen shot rather than a dark one. */
-  dark: { x: 0, z: 8, h: 1.9, yaw: -8, pitch: -16, depth: 940, lamp: 1.0 },
-  // Lamp raking the seabed. Grazing light is the hardest test of the terrain
-  // normals, and grazing light is the only light this game has.
-  floor: { x: -6, z: 4, h: 1.3, yaw: 20, pitch: -22, depth: 420, lamp: 1.0 },
-  // Looking down into nothing. Tests that "nothing" still has structure.
-  descent: { x: 0, z: 0, h: 7.5, yaw: 0, pitch: -46, depth: 52, lamp: 0.8 },
-  // Lamp thrown across the frame to catch the cone side-on: shaft test.
-  shafts: { x: -12, z: 14, h: 2.7, yaw: 46, pitch: -19, depth: 310, lamp: 1.0 },
-  // Wide establishing: terrain silhouette against the brighter water above.
-  wide: { x: 18, z: 40, h: 4.5, yaw: -22, pitch: 4, depth: 42, lamp: 0.25 },
+  // Shelf, in daylight. Kelp, caustics, the full absorption curve on screen.
+  shelf:   { x: 442, z:  30, h: 2.4, yaw: -100, pitch:   4, lamp: 0.18 },
+  // Standing at the rim looking over the edge into nothing. The shot that
+  // exists to make the drop legible before you commit to it.
+  rim:     { x: 366, z:   0, h: 4.5, yaw:  -94, pitch: -24, lamp: 0.40 },
+  // The wall itself, lamp across the face. Tests strata and grazing light.
+  wall:    { x: 232, z:  44, h: 6.0, yaw:  -84, pitch: -28, lamp: 1.0 },
+  // Canyon floor, ~440 m down. No daylight reaches here at all.
+  deep:    { x:   6, z:  22, h: 3.0, yaw:   16, pitch:  -7, lamp: 1.0 },
+  // Close lamp pool on silt: the hardest test of the terrain normals.
+  floor:   { x:  22, z: -34, h: 1.4, yaw:   34, pitch: -25, lamp: 1.0 },
+  // High over the shelf, aimed down the slope. The descent, as a picture.
+  descent: { x: 392, z:   0, h: 26,  yaw:  -92, pitch: -38, lamp: 0.45 },
 };
 
-let curPose = 'kelp';
+let curPose = 'shelf';
 const D2R = Math.PI / 180;
 
 function applyPose(name) {
-  const p = POSES[name] || POSES.kelp;
+  const p = POSES[name] || POSES.shelf;
   curPose = name;
   const y = seabedHeight(p.x, p.z) + p.h;
   // The pilot owns position and orientation; the camera is downstream of it.
   // Two owners of the camera transform is how you get a review harness whose
   // poses drift by one frame of player input.
-  pilot.setFrom(new THREE.Vector3(p.x, y, p.z), p.yaw, p.pitch, p.depth);
+  pilot.setFrom(new THREE.Vector3(p.x, y, p.z), p.yaw, p.pitch, 0);
   game.lampOn = p.lamp;
-  setDepthBand(p.depth);
   syncWater();
   // Snap, do not ease. A review frame must not depend on how long the harness
   // happened to wait for the adaptation to finish.
@@ -341,8 +348,13 @@ function applyPose(name) {
  * the palette shifts — with no code watching for it. Setting depth as an
  * independent number instead would have let the two disagree, so that swimming
  * downward changed the view without changing the water. */
+/* Harness convenience only: force a given depth at the camera's current height
+ * by offsetting the surface. Normal play never calls this — depth is wherever
+ * you have swum to. It exists so the review set can still shoot a depth ladder
+ * from one position instead of needing an eleven-kilometre mesh. */
 function setDepthBand(metres) {
-  env.surfaceY = camera.position.y + metres;
+  pilot.band = pilot.bandTarget = metres + camera.position.y - SEA_LEVEL;
+  env.surfaceY = SEA_LEVEL + pilot.band;
 }
 
 /* Eye adaptation, computed rather than measured.
@@ -378,7 +390,14 @@ function adaptExposure(dt, snap = false) {
     amb[2] * env.albedo.z * env.scatterGain,
   ];
   let lum = 0.2126 * fog[0] + 0.7152 * fog[1] + 0.0722 * fog[2];
-  lum += game.lampOn * 0.055;   // the lamp pool is in shot whatever the depth
+  /* The lamp pool is a small, very bright part of the frame, and adaptation that
+   * underestimates it opens up until that pool clips to flat white — which is
+   * what every deep review frame was doing. */
+/* The lamp's *average* contribution to the frame, which is what an exposure
+   * meter integrates — a bright pool over maybe a tenth of the image. Set to the
+   * peak instead, this closed down until the deep scenes were unreadable; set
+   * near zero it opened up until the pool clipped. */
+  lum += game.lampOn * 0.075;
   lum += 0.0016;                // bio floor, so the deep does not divide by zero
   const want = Math.min(6.0, Math.max(0.08, 0.135 / lum));
   // Exact exponential approach: frame-rate independent, and stable on a long frame.
@@ -398,9 +417,15 @@ function syncWater() {
    * lamp becomes the only light you have, so the descent gets progressively less
    * legible. This way visibility roughly doubles on the way down, which reads as
    * the world opening up around you while the darkness closes in. */
-  const turb = Math.max(0.10, 0.34 - game.depth / 2600);
+  /* Turbidity is the colour control, not the brightness control.
+   *
+   * Lowering it to let more light through walked the blend back toward oceanic
+   * water, and the whole game turned sapphire — the teal is the coastal end.
+   * Brightness comes from surfaceIrr; the water type stays where the reference
+   * is. Two knobs that look interchangeable and are not. */
+  const turb = Math.max(0.15, 0.34 - game.depth / 3400);
   env.setWater('IB', 'C1', turb);
-  env.lampInt = 620 * game.lampOn;
+  env.lampInt = 900 * game.lampOn;
   game.zone = z.name;
   game.pressure = pressureAt(game.depth);
 }
@@ -434,7 +459,11 @@ const game = {
   scene, camera, renderer, env, post,
   pilot,
   pose: (n) => { applyPose(n); },
-  setDepth: (m) => { setDepthBand(m); pilot.band = m; pilot.bandTarget = m; syncWater(); adaptExposure(0, true); },
+  /* setDepthBand already solved for the offset that yields this depth at the
+   * camera's current height; assigning the raw metres afterwards threw that
+   * solution away and asked for 1200 m of surface above a floor already 424 m
+   * down, which is how a 1200 m rung came out at 1624 m. */
+  setDepth: (m) => { setDepthBand(m); syncWater(); adaptExposure(0, true); },
   setLamp: (v) => { game.lampOn = v; syncWater(); },
   setWater: (a, b, t) => env.setWater(a, b, t),
   visibility: () => env.visibility,
@@ -471,13 +500,12 @@ function frame() {
 
   // Pilot first: everything downstream reads the camera, so it has to be final
   // before the water is evaluated or the fog lags the view by a frame.
-  const bandBefore = pilot.band;
   // Keep the vehicle in its water. MIN_DEPTH metres of cover, always.
   pilot.ceilingY = env.surfaceY - MIN_DEPTH;
   pilot.update(dt);
-  // A change of band moves the surface with the vehicle, so the dive control
-  // adds water overhead rather than teleporting the seabed.
-  env.surfaceY += pilot.band - bandBefore;
+  // Absolute surface plus an optional offset. Depth is then purely a function
+  // of where the camera is, which is what makes swimming down mean something.
+  env.surfaceY = SEA_LEVEL + pilot.band;
   syncWater();
   adaptExposure(dt);
 
@@ -560,7 +588,7 @@ function begin() {
   }
 }
 
-applyPose(qStr('pose', 'kelp'));
+applyPose(qStr('pose', 'shelf'));
 if (qs.has('depth')) game.setDepth(qNum('depth', 38));
 resize();
 

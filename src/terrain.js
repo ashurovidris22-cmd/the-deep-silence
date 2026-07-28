@@ -1,17 +1,28 @@
 import * as THREE from 'three';
 import { NOISE, WATER } from './glsl.js';
 
-/* The seafloor.
+/* The seabed, and the shape of the whole game.
+ *
+ * The first version was a gently rolling plain spanning about forty metres of
+ * vertical range. That is not a small world, it is a world with no descent in it:
+ * depth is derived from position, so forty metres of relief means the water can
+ * only ever change by forty metres' worth and every frame looks like the last.
+ *
+ * This is a submarine canyon instead — the real geography of the setting, and the
+ * only one that makes the optics do any work. A photic shelf at about sixty
+ * metres, a wall falling away for four hundred, and a silted floor at the bottom
+ * where no daylight arrives at all. Swimming down it takes you from teal
+ * afternoon to absolute black without a single scripted transition, because the
+ * absorption curve does all of it.
  *
  * Built on the CPU so normals are exact. A vertex-displaced plane with
  * screen-space derived normals looks fine on a hero shot and falls apart the
- * moment a lamp grazes it — and a grazing lamp is the only light this game
- * has, so the cheap path is not available.
+ * moment a lamp grazes it — and a grazing lamp is the only light down there.
  */
 
 /* JS twin of the GLSL value noise. These must agree: the shader adds fine
- * detail on top of the CPU heightfield, and if the two use different noise the
- * detail fights the silhouette instead of extending it. */
+ * detail on top of the CPU heightfield, and if the two disagree the detail
+ * fights the silhouette instead of extending it. */
 function hash12(x, y) {
   let px = x * 0.1031, py = y * 0.1030, pz = x * 0.0973;
   px -= Math.floor(px); py -= Math.floor(py); pz -= Math.floor(pz);
@@ -21,13 +32,18 @@ function hash12(x, y) {
   return v - Math.floor(v);
 }
 const smooth = (t) => t * t * (3 - 2 * t);
+const sstep = (a, b, x) => {
+  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+};
 function vnoise(x, y) {
   const ix = Math.floor(x), iy = Math.floor(y);
   const fx = x - ix, fy = y - iy;
   const ux = smooth(fx), uy = smooth(fy);
   const a = hash12(ix, iy), b = hash12(ix + 1, iy);
   const c = hash12(ix, iy + 1), d = hash12(ix + 1, iy + 1);
-  return (a + (b - a) * ux) + ((c + (d - c) * ux) - (a + (b - a) * ux)) * uy;
+  const top = a + (b - a) * ux;
+  return top + ((c + (d - c) * ux) - top) * uy;
 }
 function fbm(x, y, oct = 5) {
   let a = 0.5, s = 0, n = 0;
@@ -43,23 +59,55 @@ function ridged(x, y, oct = 5) {
   return s / n;
 }
 
+/* World layout, in metres. Absolute Y, because depth is now a property of where
+ * you are rather than a number the game carries around separately. */
+export const SEA_LEVEL = 40;      // world Y of the surface
+export const SHELF_Y = -10;       // ~62 m deep: kelp, caustics, daylight
+export const CANYON_Y = -398;     // ~438 m deep: silt, no sun at all
+export const CANYON_HALF = 96;    // half-width of the flat floor
+export const RIM = 330;           // where the wall meets the shelf
+
 /**
  * Height of the seabed at a world XZ, in metres.
  *
- * Composed rather than summed at one frequency: a broad basin so the floor
- * falls away from the spawn and gives the eye somewhere to descend into, ridged
- * detail for erosion creases, and a fine grain that only reads within lamp
- * range. Exported because the sub has to not fly through it.
+ * The canyon runs along Z so that the walls are always to either side and the
+ * player can descend by simply following the slope down — no waypoint needed,
+ * because gravity and curiosity point the same way.
  */
 export function seabedHeight(x, z) {
-  const basin = -34 + 26 * fbm(x * 0.0032, z * 0.0032, 4);
-  const ridges = 13 * (ridged(x * 0.011, z * 0.011, 5) - 0.5);
-  const dunes = 2.4 * fbm(x * 0.055, z * 0.055, 4);
-  const grain = 0.5 * fbm(x * 0.42, z * 0.42, 3);
-  return basin + ridges + dunes + grain;
+  // Canyon axis meanders, so the trench is not a straight ditch.
+  const axis = 46 * (fbm(z * 0.0016 + 7.3, 11.1, 3) - 0.5);
+  const ax = Math.abs(x - axis);
+
+  // Cross-section: flat floor, steep wall, then shelf.
+  const t = sstep(CANYON_HALF, RIM, ax);
+
+  const shelf = SHELF_Y + 13 * fbm(x * 0.0042, z * 0.0042, 4)
+                        + 5.5 * (ridged(x * 0.013, z * 0.013, 4) - 0.5);
+  const floor = CANYON_Y + 22 * fbm(x * 0.0031 + 3.1, z * 0.0031, 4);
+
+  // Cosine-eased wall rather than a linear ramp: gives a concave foot where
+  // scree would pile and a convex lip at the rim, which is what erosion leaves.
+  const wall = floor + (shelf - floor) * (0.5 - 0.5 * Math.cos(Math.PI * t));
+
+  // Wall relief. Amplitude scales with slope so the shelf stays calm while the
+  // face gets the buttresses and gullies that make a cliff read as rock.
+  const slope = 4 * t * (1 - t);
+  const gullies = 34 * slope * (ridged(x * 0.0075 + 21.7, z * 0.0075, 5) - 0.5);
+  const benches = 11 * slope * (fbm(x * 0.019, z * 0.019, 3) - 0.5);
+
+  const dunes = 2.6 * fbm(x * 0.055, z * 0.055, 4) * (1 - slope * 0.6);
+  const grain = 0.55 * fbm(x * 0.42, z * 0.42, 3);
+
+  return wall + gullies + benches + dunes + grain;
 }
 
-export function buildTerrain(size = 620, seg = 340) {
+/** True where there is enough light for kelp. Used to keep flora on the shelf. */
+export function isPhotic(x, z) {
+  return SEA_LEVEL - seabedHeight(x, z) < 105;
+}
+
+export function buildTerrain(size = 1200, seg = 480) {
   const geo = new THREE.PlaneGeometry(size, size, seg, seg);
   geo.rotateX(-Math.PI / 2);
   const pos = geo.attributes.position;
@@ -74,6 +122,7 @@ export function buildTerrain(size = 620, seg = 340) {
       uExt: { value: new THREE.Vector3() },
       uKd: { value: new THREE.Vector3() },
       uAlbedo: { value: new THREE.Vector3() },
+      uScat: { value: new THREE.Vector3() },
       uSurfaceIrr: { value: new THREE.Vector3() },
       uSurfaceY: { value: 0 },
       uScatterGain: { value: 1 },
@@ -105,18 +154,10 @@ export function buildTerrain(size = 620, seg = 340) {
         /* Noise budget, counted rather than assumed.
          *
          * This shader is the frame. The seabed fills most of every shot, so its
-         * per-pixel cost is very nearly the whole cost of the game — and the
-         * first version spent about a hundred value-noise lookups here, roughly
-         * four hundred hash rounds per pixel. On a real GPU at 1920x1080 that
-         * measured ten frames a second, which is not a "needs optimising later"
-         * number, it is unshippable.
-         *
-         * Two changes, no visible loss: sample the detail field at two octaves
-         * instead of five (the finest octaves were below a pixel at any distance
-         * the water lets you see anyway), and derive albedo, mottle and biofilm
-         * from ONE shared low-frequency lookup instead of three independent ones.
-         * Nine lookups, down from about a hundred.
-         */
+         * per-pixel cost is very nearly the whole cost of the game. Two octaves
+         * for the detail field (the finer ones are sub-pixel at any distance the
+         * water permits) and ONE shared low-frequency lookup feeding albedo,
+         * mottle and biofilm rather than three independent ones. */
         vec2 p = vW.xz;
         float e = 0.4;
         float h  = fbm(p*2.4, 2);
@@ -124,52 +165,67 @@ export function buildTerrain(size = 620, seg = 340) {
         float hz = fbm((p+vec2(0.0,e))*2.4, 2);
         vec3 n = normalize(vN + vec3(-(hx-h)/e, 0.0, -(hz-h)/e) * 1.15);
 
-        // One shared low-frequency field, read three ways. Independent noise per
-        // channel costs three times as much and looks no less arbitrary.
         float lo = fbm(p*0.32, 3);
-
-        // Sediment. Silt settles in the flats, coarser scree shows on slopes —
-        // so albedo is driven by the surface normal, not by another noise
-        // channel that happens to look busy.
         float flat_ = smoothstep(0.55, 0.96, n.y);
+
+        /* Bedding planes on the steep faces.
+         *
+         * A canyon wall is not a rock-coloured slope, it is stacked sediment cut
+         * open — so the banding runs with world height and shows only where the
+         * face is steep enough to expose it. Keyed to vW.y rather than to a
+         * texture coordinate, which means every stratum is continuous across the
+         * whole cliff instead of stopping at a mesh seam. */
+        float steep = 1.0 - flat_;
+        float bandN = fbm(vec2(vW.y*0.11, lo*2.0), 2);
+        float strata = sin(vW.y * 0.42 + bandN * 5.0);
+        strata = smoothstep(-0.15, 0.65, strata);
+
         vec3 silt  = vec3(0.216, 0.203, 0.171);
         vec3 scree = vec3(0.121, 0.124, 0.117);
-        vec3 alb = mix(scree, silt, flat_ * (0.55 + 0.45*lo));
-        alb *= 0.82 + 0.32 * h;   // reuse the detail field instead of a new one
+        vec3 rockA = vec3(0.148, 0.139, 0.126);
+        vec3 rockB = vec3(0.088, 0.091, 0.096);
 
-        // Patchy biofilm. Not everywhere — a uniform green tint reads as a
-        // colour grade, whereas patches read as something living. Offset the
-        // same field rather than sampling a fresh one.
+        vec3 alb = mix(scree, silt, flat_ * (0.55 + 0.45*lo));
+        alb = mix(alb, mix(rockB, rockA, strata), steep * 0.82);
+        alb *= 0.82 + 0.32 * h;
+
+        // Patchy biofilm on the flats only. A uniform green tint reads as a
+        // colour grade; patches read as something living.
         float bio = smoothstep(0.54, 0.86, 1.0 - lo) * flat_;
         alb = mix(alb, vec3(0.086,0.132,0.072), bio*0.42);
 
-        // Lamp: cone falloff and inverse square, both honest.
+        // Lamp: cone falloff, inverse square, and attenuation over the outward
+        // path as well as the return.
         vec3  toL = uLampPos - vW;
         float dL  = length(toL);
         vec3  L   = toL / max(dL,1e-4);
         float cone = smoothstep(uLampCos, uLampCos + uLampSoft, dot(-L, normalize(uLampDir)));
-        float atten = uLampInt / (1.0 + dL*dL*0.85);
-        // Wrapped diffuse — silt is dusty and does not have a hard terminator.
+        /* Finite source size, not a mathematical point.
+         *
+         * A real floodlight has a lens some tens of centimetres across, so the
+         * 1/d^2 hotspot is capped rather than divergent. Written as a point the
+         * pool went to nineteen in linear HDR two metres out and clipped to a
+         * flat white blob with no readable ground in it — while six metres away,
+         * after the doubled optical path, there was almost nothing. The r0 term
+         * flattens that ratio from about forty to one down to something a tone
+         * curve can actually hold. */
+        float atten = uLampInt / (6.0 + dL*dL*1.0);
+        // Wrapped diffuse — silt is dusty and has no hard terminator.
         float ndl = pow(clamp((dot(n,L)+0.28)/1.28, 0.0, 1.0), 1.35);
         vec3 lit = alb * uLampCol * ndl * atten * cone * lampTransmit(dL);
 
-        // Ambient from above, occluded by facing down. Kept at full strength:
-        // the seabed is lit by the same field that lights the water, so any
-        // factor below 1 makes the floor read as a hole in the fog.
         vec3 daylight = ambientAt(vW.y);
-        vec3 amb = daylight * (0.30 + 0.70*clamp(n.y*0.5+0.5,0.0,1.0));
-        lit += alb * amb;
+        lit += alb * daylight * (0.30 + 0.70*clamp(n.y*0.5+0.5,0.0,1.0));
 
         /* Caustics, driven by the daylight term itself.
          *
          * Multiplying by the daylight vector rather than by a hand-written depth
-         * fade means they need no rule of their own: bright in ten metres of
-         * water, faint at eighty, simply absent below the photic zone, because
-         * that is what happens to the beam that makes them. Upward faces only —
-         * a caustic on a vertical wall is a decal.
+         * fade means they need no rule of their own: bright on the shelf, faint
+         * at the rim, simply absent on the canyon floor, because that is what
+         * happens to the beam that makes them. Upward faces only — a caustic on
+         * a vertical wall is a decal.
          *
-         * (No backticks in here. This is inside a JS template literal, and one
-         * stray backtick terminates the shader mid-comment.) */
+         * (No backticks in here: this is inside a JS template literal.) */
         float caus = caustic(vW.xz, uTime) * smoothstep(0.15, 0.75, n.y);
         lit += alb * daylight * caus * 2.4;
 

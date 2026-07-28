@@ -51,8 +51,8 @@ export class Pilot {
     // Depth band. Moving vertically inside the scene changes depth by metres;
     // this lets you change it by kilometres, which is the only way to see the
     // whole optical range without a seabed eleven kilometres tall.
-    this.bandTarget = 38;
-    this.band = 38;
+    this.bandTarget = 0;
+    this.band = 0;
 
     this.keys = new Set();
     this._bind();
@@ -94,8 +94,12 @@ export class Pilot {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       this.keys.add(e.code);
       if (e.code === 'KeyL') this.toggleLamp?.();
-      if (e.code === 'BracketRight') this.bandTarget = Math.min(6000, this.bandTarget * 1.35 + 12);
-      if (e.code === 'BracketLeft') this.bandTarget = Math.max(4, (this.bandTarget - 12) / 1.35);
+      /* Additive, and now a secondary control rather than the way you descend.
+       * With a four-hundred-metre canyon in the world, descending is swimming
+       * down it; this only offsets the surface so the optics beyond the world's
+       * own range can still be reached and inspected. */
+      if (e.code === 'BracketRight') this.bandTarget = Math.min(5600, this.bandTarget + 70);
+      if (e.code === 'BracketLeft') this.bandTarget = Math.max(-30, this.bandTarget - 70);
       if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'ShiftLeft'].includes(e.code)) e.preventDefault();
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));

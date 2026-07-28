@@ -13,7 +13,7 @@ import { rng, SEEDS } from './rng.js';
  * Distributed in a box that follows the camera and wraps, so density is
  * constant no matter where you are and no particle is ever wasted off-screen.
  */
-export function buildSnow(count = 6800, box = 46, seed = SEEDS.snow) {
+export function buildSnow(count = 3400, box = 46, seed = SEEDS.snow) {
   const rand = rng(seed);
   const g = new THREE.BufferGeometry();
   const pos = new Float32Array(count * 3);
@@ -132,7 +132,13 @@ export function buildSnow(count = 6800, box = 46, seed = SEEDS.snow) {
         lit = min(lit, vec3(0.62));
 
         vec3 col = applyWater(lit, vW);
-        gl_FragColor = vec4(col, a * vFade * (0.34 + 0.4*vBig));
+        /* Alpha kept low, because these overlap.
+         *
+         * Thousands of soft discs at up to 0.74 alpha do not read as specks in
+         * the water, they composite into a grey veil over the whole frame — the
+         * review set showed the identical shot markedly brighter with snow turned
+         * off, which is the tell. Individually faint, collectively present. */
+        gl_FragColor = vec4(col, a * vFade * (0.15 + 0.24*vBig));
       }`,
   });
 

@@ -65,6 +65,8 @@ export class Post {
     this.rtVol = this._rt(w * this.volScale, h * this.volScale);
     this.rtVol2 = this._rt(w * this.volScale, h * this.volScale);
     this.rtBright = this._rt(w / 2, h / 2);
+    this.rtDof = this._rt(w / 2, h / 2);
+    this.rtDof2 = this._rt(w / 2, h / 2);
     this.mips = [];
     for (let i = 0; i < MIPS; i++) {
       this.mips.push(this._rt(w / (4 << i), h / (4 << i)));
@@ -82,6 +84,8 @@ export class Post {
     this.rtVol.setSize(Math.max(1, (w * this.volScale) | 0), Math.max(1, (h * this.volScale) | 0));
     this.rtVol2.setSize(Math.max(1, (w * this.volScale) | 0), Math.max(1, (h * this.volScale) | 0));
     this.rtBright.setSize(Math.max(1, w / 2 | 0), Math.max(1, h / 2 | 0));
+    this.rtDof.setSize(Math.max(1, w / 2 | 0), Math.max(1, h / 2 | 0));
+    this.rtDof2.setSize(Math.max(1, w / 2 | 0), Math.max(1, h / 2 | 0));
     for (let i = 0; i < MIPS; i++) {
       const d = 4 << i;
       this.mips[i].setSize(Math.max(1, w / d | 0), Math.max(1, h / d | 0));
@@ -328,6 +332,11 @@ export class Post {
     this.matComp = new THREE.ShaderMaterial({
       uniforms: {
         tScene: { value: null }, tVol: { value: null }, tBloom: { value: null },
+        tDof: { value: null }, tDepth: { value: null },
+        uNear: { value: 0.1 }, uFar: { value: 900 },
+        /* Focus a few metres out, which is where a submersible's lamp actually
+         * puts anything worth looking at. */
+        uFocus: { value: 7.5 }, uDofAmount: { value: 1.0 },
         uExposure: { value: 1.0 }, uBloom: { value: 0.62 },
         uGrain: { value: 0.011 }, uVignette: { value: 0.42 }, uCA: { value: 0.0016 },
         uTime: { value: 0 }, uRes: { value: new THREE.Vector2() },
@@ -338,8 +347,9 @@ export class Post {
         precision highp float;
         ${NOISE}
         varying vec2 vUv;
-        uniform sampler2D tScene, tVol, tBloom;
+        uniform sampler2D tScene, tVol, tBloom, tDof, tDepth;
         uniform float uExposure, uBloom, uGrain, uVignette, uCA, uTime;
+        uniform float uNear, uFar, uFocus, uDofAmount;
         uniform vec2 uRes; uniform vec3 uLift;
 
         // ACES fitted (Stephen Hill). Keeps saturated highlights from turning
@@ -369,6 +379,22 @@ export class Post {
           col.r = texture2D(tScene, uv + off).r;
           col.g = texture2D(tScene, uv).g;
           col.b = texture2D(tScene, uv - off).b;
+
+          /* Depth of field, and it is the near field that matters.
+           *
+           * The single strongest cue that a frame was photographed rather than
+           * rendered is something out of focus in front of the lens. Underwater
+           * that is free content: the marine snow drifting a handful of
+           * centimetres from the port is exactly what a real housing cannot hold
+           * in focus. Far blur is kept mild because the fog is already doing that
+           * job honestly and doubling it just reads as mush.
+           */
+          float dRaw = texture2D(tDepth, uv).r;
+          float zl = (2.0*uNear*uFar) / (uFar + uNear - (dRaw*2.0-1.0)*(uFar-uNear));
+          float nearCoc = smoothstep(uFocus*0.72, 0.28, zl);
+          float farCoc  = smoothstep(uFocus*2.4, uFocus*8.0, zl) * 0.42;
+          float coc = clamp((nearCoc + farCoc) * uDofAmount, 0.0, 1.0);
+          col = mix(col, texture2D(tDof, uv).rgb, coc);
 
           col += texture2D(tVol, uv).rgb;
           col += texture2D(tBloom, uv).rgb * uBloom;
@@ -425,7 +451,16 @@ export class Post {
     this.matBlur.uniforms.uTexel.value.set(1 / this.rtVol.width, 1 / this.rtVol.height);
     this._draw(this.matBlur, this.rtVol2);
 
-    // 3. bloom: bright pass, then a down/up pyramid
+    // 3. defocus source: two wide taps at half res. Cheap, and a circular
+    //    bokeh is wasted on a medium that has no hard highlights anyway.
+    this.matBlur.uniforms.tSrc.value = this.rtScene.texture;
+    this.matBlur.uniforms.uTexel.value.set(1.6 / this.w, 1.6 / this.h);
+    this._draw(this.matBlur, this.rtDof);
+    this.matBlur.uniforms.tSrc.value = this.rtDof.texture;
+    this.matBlur.uniforms.uTexel.value.set(2.4 / this.rtDof.width, 2.4 / this.rtDof.height);
+    this._draw(this.matBlur, this.rtDof2);
+
+    // 4. bloom: bright pass, then a down/up pyramid
     this.matBright.uniforms.tSrc.value = this.rtScene.texture;
     this._draw(this.matBright, this.rtBright);
 
@@ -452,6 +487,9 @@ export class Post {
     c.tScene.value = this.rtScene.texture;
     c.tVol.value = this.rtVol2.texture;
     c.tBloom.value = up.texture;
+    c.tDof.value = this.rtDof2.texture;
+    c.tDepth.value = this.rtScene.depthTexture;
+    c.uNear.value = camera.near; c.uFar.value = camera.far;
     c.uRes.value.set(this.w, this.h);
     c.uExposure.value = this.exposure;
     c.uBloom.value = this.bloomStrength;

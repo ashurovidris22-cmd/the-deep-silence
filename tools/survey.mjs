@@ -24,22 +24,23 @@ const PRE = `g.setLayer('hud',false); g.setLayer('kelp',true); g.setLayer('rocks
   g.setLayer('snow',true); g.setLayer('terrain',true); g.setLayer('beacons',true);`;
 
 const SHOTS = [
-  ['a-kelp',    `g.pose('kelp');`],
-  ['b-dark',    `g.pose('dark');`],
-  ['c-floor',   `g.pose('floor');`],
-  ['d-descent', `g.pose('descent');`],
-  ['e-shafts',  `g.pose('shafts');`],
-  ['f-wide',    `g.pose('wide');`],
-  // Depth ladder on one fixed pose. The absorption curve IS the art direction,
-  // so it has to be reviewable as a series, not one frame at a time.
-  ['g-d0010',   `g.pose('wide'); g.setDepth(10);`],
-  ['h-d0080',   `g.pose('wide'); g.setDepth(80);`],
-  ['i-d0300',   `g.pose('wide'); g.setDepth(300);`],
-  ['j-d1200',   `g.pose('wide'); g.setDepth(1200); g.setLamp(1);`],
+  ['a-shelf',   `g.pose('shelf');`],
+  ['b-rim',     `g.pose('rim');`],
+  ['c-wall',    `g.pose('wall');`],
+  ['d-deep',    `g.pose('deep');`],
+  ['e-floor',   `g.pose('floor');`],
+  ['f-descent', `g.pose('descent');`],
+  // Depth is a property of position now, so the ladder is shot by standing in
+  // different places rather than by retuning a number — which also means each
+  // rung is a real location and can be judged as a picture.
+  ['g-shelf-noc', `g.pose('shelf'); g.setLayer('kelp', false);`],
+  ['h-deep-dark', `g.pose('deep'); g.setLamp(0);`],
+  ['i-wall-lit',  `g.pose('wall'); g.setLamp(1);`],
+  // Surface-offset rungs, for optics past the world's own 440 m of range.
+  ['j-d1200',   `g.pose('floor'); g.setDepth(1200); g.setLamp(1);`],
   ['k-d4000',   `g.pose('floor'); g.setDepth(4000); g.setLamp(1);`],
-  // No marine snow. If the frame looks the same, the snow is not earning its
-  // draw cost; if it looks dead, snow is load-bearing and must never regress.
-  ['l-nosnow',  `g.pose('kelp'); g.setLayer('snow',false);`],
+  // No marine snow: if the frame looks the same, snow is not earning its cost.
+  ['l-nosnow',  `g.pose('shelf'); g.setLayer('snow',false);`],
 ];
 
 const browser = await launch();
