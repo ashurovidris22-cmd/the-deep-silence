@@ -45,6 +45,37 @@ const COMMON_UNIFORMS = () => ({
  * the frame, and a 6 m boulder centred on the viewpoint is the whole shot. Both
  * happened. Procedural placement has no idea where the camera will be, so the
  * camera has to tell it. */
+/* 3D value noise, for displacing a sphere into a rock.
+ *
+ * A 2D field cannot do this: a boulder needs its silhouette broken in every
+ * direction, and driving displacement from XZ alone gives a shape that is
+ * irregular in plan and a smooth dome in elevation. */
+function h3(ix, iy, iz) {
+  let n = ix * 374761393 + iy * 668265263 + iz * 1274126177;
+  n = (n ^ (n >>> 13)) >>> 0;
+  n = Math.imul(n, 1274126177) >>> 0;
+  return ((n ^ (n >>> 16)) >>> 0) / 4294967296;
+}
+const sm = (t) => t * t * (3 - 2 * t);
+function vnoise3(x, y, z) {
+  const ix = Math.floor(x), iy = Math.floor(y), iz = Math.floor(z);
+  const fx = sm(x - ix), fy = sm(y - iy), fz = sm(z - iz);
+  const l = (a, b, t) => a + (b - a) * t;
+  const c00 = l(h3(ix, iy, iz), h3(ix + 1, iy, iz), fx);
+  const c10 = l(h3(ix, iy + 1, iz), h3(ix + 1, iy + 1, iz), fx);
+  const c01 = l(h3(ix, iy, iz + 1), h3(ix + 1, iy, iz + 1), fx);
+  const c11 = l(h3(ix, iy + 1, iz + 1), h3(ix + 1, iy + 1, iz + 1), fx);
+  return l(l(c00, c10, fy), l(c01, c11, fy), fz);
+}
+function fbm3(x, y, z, oct = 4) {
+  let a = 0.5, s = 0, n = 0;
+  for (let i = 0; i < oct; i++) {
+    s += a * vnoise3(x, y, z); n += a;
+    x *= 2.03; y *= 2.03; z *= 2.03; a *= 0.5;
+  }
+  return s / n;
+}
+
 function blocked(clear, x, z) {
   for (const c of clear) {
     const dx = x - c.x, dz = z - c.z;
@@ -224,17 +255,37 @@ export function buildRocks(count = 440, radius = 72, clear = [], seed = SEEDS.ro
     return Math.hypot(dx, dz) / (2 * e);
   };
   const rand = rng(seed);
-  const base = new THREE.IcosahedronGeometry(1, 2);
-  const p = base.attributes.position;
-  for (let i = 0; i < p.count; i++) {
-    const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
-    // Lumpy but convex-ish. Real boulders are faceted by fracture, so the
-    // deformation is low frequency and biased flat on top from sediment.
-    const n = 0.72 + 0.42 * Math.abs(Math.sin(x * 2.7) * Math.cos(z * 2.1) * Math.sin(y * 1.9));
-    p.setXYZ(i, x * n, y * n * 0.72, z * n);
+  /* Three base shapes at detail 3, displaced by real 3D noise.
+   *
+   * The previous version was one icosahedron at detail 2 — 320 triangles — pushed
+   * around by a product of three sines. Two things made it read as a low-poly
+   * prop: a sine product is smooth and almost separable, so the silhouette stayed
+   * close to the underlying polyhedron, and at 320 triangles that polyhedron's own
+   * facets are visible from a couple of metres away.
+   *
+   * Detail 3 is 1280 triangles, and four octaves of 3D fbm break the outline in
+   * every direction rather than pushing a dome around. Three distinct shapes,
+   * because instancing one boulder nine hundred times is recognisable no matter
+   * how it is scaled or spun. */
+  const bases = [];
+  for (let variant = 0; variant < 3; variant++) {
+    const g = new THREE.IcosahedronGeometry(1, 3);
+    const p = g.attributes.position;
+    const off = variant * 17.3;
+    for (let i = 0; i < p.count; i++) {
+      const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+      // Broad mass, then fracture-scale relief. Bias the top flatter: sediment
+      // settles and the exposed crown weathers.
+      const broad = 0.70 + 0.52 * fbm3(x * 1.15 + off, y * 1.15, z * 1.15 + off, 3);
+      const rough = 0.11 * (fbm3(x * 4.4 + off, y * 4.4, z * 4.4, 3) - 0.5);
+      const n = broad + rough;
+      p.setXYZ(i, x * n, y * n * (0.70 + 0.12 * variant), z * n);
+    }
+    p.needsUpdate = true;
+    g.computeVertexNormals();
+    bases.push(g);
   }
-  p.needsUpdate = true;
-  base.computeVertexNormals();
+  const base = bases[0];
 
   const geo = new THREE.InstancedBufferGeometry();
   geo.index = base.index;
@@ -294,9 +345,31 @@ export function buildRocks(count = 440, radius = 72, clear = [], seed = SEEDS.ro
       uniform float uTime;
 
       void main(){
+        float dist = length(cameraPosition - vW);
+        float fine = exp(-dist * 0.55);
+        float mid  = exp(-dist * 0.11);
+
+        /* Triplanar surface detail, so the mesh is not the whole story.
+         *
+         * Geometry alone gives the boulder its outline; this gives it stone. Rock
+         * is pitted and flaky at centimetre scale, which no practical triangle
+         * count reaches — and without it a well-shaped boulder still reads as a
+         * smooth prop up close. Projected three ways because these have no UVs,
+         * and faded by distance for the same anti-aliasing reason as the seabed. */
+        vec3 an = abs(vN);
+        vec3 bw = an / max(an.x + an.y + an.z, 1e-4);
+        float e = 0.06;
+        #define ROCK(s) ( bw.x*vnoise(vW.zy*(s)) + bw.y*vnoise(vW.xz*(s)) + bw.z*vnoise(vW.xy*(s)) )
+        float d0 = ROCK(9.0) + 0.5*ROCK(31.0)*fine;
+        float dx = bw.x*vnoise((vW.zy+vec2(e,0.0))*9.0) + bw.y*vnoise((vW.xz+vec2(e,0.0))*9.0) + bw.z*vnoise((vW.xy+vec2(e,0.0))*9.0);
+        float dz = bw.x*vnoise((vW.zy+vec2(0.0,e))*9.0) + bw.y*vnoise((vW.xz+vec2(0.0,e))*9.0) + bw.z*vnoise((vW.xy+vec2(0.0,e))*9.0);
+        vec3 nDet = normalize(vN + vec3(-(dx-d0)/e, 0.0, -(dz-d0)/e) * 0.22 * mid);
+
         vec2 q = vW.xz * 1.4 + vW.y * 0.7;
         float grain = fbm(q*2.2, 4);
         vec3 alb = mix(vec3(0.104,0.101,0.096), vec3(0.163,0.156,0.140), grain);
+        // Tonal speckle from the same field that bumps it, so grain and shading agree.
+        alb *= 0.86 + 0.30 * d0 * mid;
 
         // Sediment settles on upward faces and biofilm follows it. Tied to the
         // normal so it always looks deposited rather than painted.
@@ -310,7 +383,7 @@ export function buildRocks(count = 440, radius = 72, clear = [], seed = SEEDS.ro
         vec3  L   = toL / max(dL,1e-4);
         float cone = smoothstep(uLampCos, uLampCos + uLampSoft, dot(-L, normalize(uLampDir)));
         float atten = uLampInt / (6.0 + dL*dL*1.0);
-        float ndl = max(dot(vN, L), 0.0);
+        float ndl = max(dot(nDet, L), 0.0);
         vec3 lit = alb * uLampCol * ndl * atten * cone * lampTransmit(dL);
         vec3 daylight = ambientAt(vW.y);
         lit += alb * daylight * (0.26 + 0.62*up);

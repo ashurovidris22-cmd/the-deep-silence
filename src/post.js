@@ -402,7 +402,15 @@ export class Post {
            * is also the only place the effect is worth having. */
           float nearCoc = smoothstep(1.5, 0.3, zl);
           float farCoc  = smoothstep(uFocus*3.0, uFocus*10.0, zl) * 0.30;
-          float coc = clamp((nearCoc + farCoc) * uDofAmount, 0.0, 1.0);
+          /* Skip defocus on the cockpit.
+           *
+           * The interior sits half a metre from the eye, well inside the near
+           * blur, so it would be smeared into paste — and it is the one surface
+           * the player needs to read. The scene pass writes alpha 1 everywhere
+           * except the cabin, which writes 0, so one multiply excludes it without
+           * a second render target or a stencil. */
+          float notCabin = texture2D(tScene, uv).a;
+          float coc = clamp((nearCoc + farCoc) * uDofAmount, 0.0, 1.0) * notCabin;
           col = mix(col, texture2D(tDof, uv).rgb, coc);
 
           col += texture2D(tVol, uv).rgb;

@@ -5,6 +5,7 @@ import { buildKelp, buildRocks } from './props.js';
 import { buildSnow } from './snow.js';
 import { buildStation } from './structures.js';
 import { buildSub } from './sub.js';
+import { buildCabin } from './cabin.js';
 import { Post } from './post.js';
 import { Pilot } from './controls.js';
 import { FS_VERT, WATER } from './glsl.js';
@@ -272,7 +273,7 @@ const terrain = buildTerrain();
  * anything. Restricting it to the shelf also gives the descent a real threshold
  * — the vegetation thins out, then stops, and after that it is rock and silt. */
 const kelp = buildKelp(950, 150, CAM_SPOTS, undefined, isPhotic, { x: 430, z: 0 });
-const rocks = buildRocks(900, 420, CAM_SPOTS);
+const rocks = buildRocks(520, 420, CAM_SPOTS);
 const snow = buildSnow();
 scene.add(terrain, kelp, rocks, snow);
 
@@ -296,6 +297,11 @@ scene.add(station.mesh);
 /* The wreck. Lofted, unlike the station, and placed where the walkway leads. */
 const sub = buildSub();
 scene.add(sub.mesh);
+
+/* The cockpit. Rides the camera each frame, so it is authored in camera-local
+ * space and never enters the world transform at all. */
+const cabin = buildCabin();
+scene.add(cabin.mesh);
 
 const beaconSpecs = [
   { pos: [ 34, -390, -12], col: [220, 300, 330], size: 0.55 },
@@ -525,7 +531,7 @@ const game = {
   setWater: (a, b, t) => env.setWater(a, b, t),
   visibility: () => env.visibility,
   setLayer: (name, on) => {
-    const o = { kelp, rocks, snow, terrain, beacons, station: station.mesh, sub: sub.mesh }[name];
+    const o = { kelp, rocks, snow, terrain, beacons, station: station.mesh, sub: sub.mesh, cabin: cabin.mesh }[name];
     if (o) o.visible = on;
     if (name === 'hud') document.getElementById('hud').hidden = !on;
   },
@@ -602,6 +608,23 @@ function frame() {
   backdrop.material.uniforms.uInvView.value.copy(camera.matrixWorld);
   post.matVol.uniforms.uTime.value = game.time;
   post.matComp.uniforms.uTime.value = game.time;
+
+  /* Bolt the cockpit to the eye.
+   *
+   * Copying the camera transform is what makes a camera-local model behave like
+   * a vehicle the player is sitting in. Done after the pilot update so it cannot
+   * lag the view by a frame — at half a metre, one frame of lag is a visible
+   * wobble of the whole cabin. */
+  cabin.mesh.position.copy(camera.position);
+  cabin.mesh.quaternion.copy(camera.quaternion);
+  const cu = cabin.mat.uniforms;
+  cu.uTime.value = game.time;
+  cu.uPressure.value = game.pressure;
+  cu.uDepth.value = game.depth;
+  // The alarm answers the hull rating, so the dread is a function of depth
+  // rather than a scripted beat.
+  cu.uAlarm.value = Math.min(1, Math.max(0, (game.depth - 260) / 340));
+  cu.uCabinLight.value = 1.0;
 
   renderer.info.reset();
   post.render(scene, camera, env);
