@@ -3,6 +3,7 @@ import { water, visibility, zoneAt, pressureAt } from './jerlov.js';
 import { buildTerrain, seabedHeight, isPhotic, SEA_LEVEL, CANYON_HALF, RIM } from './terrain.js';
 import { buildKelp, buildRocks } from './props.js';
 import { buildSnow } from './snow.js';
+import { buildStation } from './structures.js';
 import { Post } from './post.js';
 import { Pilot } from './controls.js';
 import { FS_VERT, WATER } from './glsl.js';
@@ -255,6 +256,9 @@ scene.add(backdrop);
 const CAM_SPOTS = [
   { x: 442, z: 30, r: 3.2 }, { x: 366, z: 0, r: 3.5 }, { x: 232, z: 44, r: 3.5 },
   { x: 6, z: 22, r: 3.2 }, { x: 22, z: -34, r: 3.2 }, { x: 392, z: 0, r: 4.5 },
+  // Keep boulders out of the installation footprint and off the walkway.
+  { x: 30, z: -18, r: 15 }, { x: 19, z: 18, r: 6 }, { x: 54, z: 4, r: 5 },
+  { x: 14, z: 40, r: 6 },
 ];
 
 const terrain = buildTerrain();
@@ -278,12 +282,21 @@ scene.add(terrain, kelp, rocks, snow);
  * hundred times brighter than anything around it. The bloom pass turns that
  * into the blown disc the eye reads as "powered, and far away". */
 /* On the canyon floor, where they are the only light there is. */
+/* The installation, and the lights it carries.
+ *
+ * Built before the beacons because it decides where they go: a hazard lamp
+ * belongs on top of a tower that exists, not at a coordinate chosen by hand and
+ * then quietly left floating when the tower moves. */
+const station = buildStation();
+scene.add(station.mesh);
+
 const beaconSpecs = [
   { pos: [ 34, -390, -12], col: [220, 300, 330], size: 0.55 },
   { pos: [ 38, -392, -15], col: [150, 200, 225], size: 0.34 },
   { pos: [ 29, -394, -19], col: [260,  90,  30], size: 0.30 },  // red hazard marker
   { pos: [-18, -393, -26], col: [ 40, 210,  90], size: 0.40 },  // bio / green sodium
   { pos: [-22, -396, -31], col: [ 26, 150,  66], size: 0.26 },
+  ...station.lights,
 ];
 const beacons = buildBeacons(env, beaconSpecs);
 scene.add(beacons);
@@ -293,7 +306,7 @@ env.points = [
   { pos: new THREE.Vector3(-18, -393, -26), col: new THREE.Vector3(1.8, 8.5, 3.6) },
 ];
 
-for (const o of [terrain, kelp, rocks, snow, backdrop]) env.register(o.material);
+for (const o of [terrain, kelp, rocks, snow, backdrop, station.mesh]) env.register(o.material);
 env.register(beacons.userData.mat);
 
 /* -------------------------------------------------------------------- poses
@@ -325,6 +338,19 @@ const POSES = {
   deep:    { x:   6, z:  22, h: 3.0, yaw:   16, pitch:  -7, lamp: 1.0 },
   // Close lamp pool on silt: the hardest test of the terrain normals.
   floor:   { x:  22, z: -34, h: 1.4, yaw:   34, pitch: -25, lamp: 1.0 },
+  /* On the walkway, looking along it into nothing.
+   *
+   * This is the reference frame: a handrail receding, two red lamps a long way
+   * off, and otherwise black. It is also the shot that proves the steel is doing
+   * its job — straight lines give the eye a scale and a sharpness reference that
+   * noise-derived rock cannot. */
+  catwalk: { x: 19, z: 18, h: 7.2, yaw: -159, pitch:  -5, lamp: 1.0 },
+  // The platform from off to one side, so its silhouette reads against the dark.
+  /* Yaw solved from the geometry, not guessed. The platform sits at (30,-18) and
+   * this camera at (54,4), so the heading is atan2(dx, -dz) of that difference —
+   * about -48 degrees. Guessing -112 aimed it into open water and the frame came
+   * back as nothing but lamp glow. */
+  station: { x: 54, z:  4, h: 7.5, yaw:  -48, pitch: -11, lamp: 1.0 },
   // High over the shelf, aimed down the slope. The descent, as a picture.
   descent: { x: 392, z:   0, h: 26,  yaw:  -92, pitch: -38, lamp: 0.45 },
 };
@@ -479,7 +505,7 @@ const game = {
   setWater: (a, b, t) => env.setWater(a, b, t),
   visibility: () => env.visibility,
   setLayer: (name, on) => {
-    const o = { kelp, rocks, snow, terrain, beacons }[name];
+    const o = { kelp, rocks, snow, terrain, beacons, station: station.mesh }[name];
     if (o) o.visible = on;
     if (name === 'hud') document.getElementById('hud').hidden = !on;
   },

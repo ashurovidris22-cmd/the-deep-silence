@@ -21,7 +21,8 @@ fs.mkdirSync(OUT, { recursive: true });
  * State that leaks forward is the failure mode that produced twenty frames of
  * an empty starfield in the project this harness is modelled on. */
 const PRE = `g.setLayer('hud',false); g.setLayer('kelp',true); g.setLayer('rocks',true);
-  g.setLayer('snow',true); g.setLayer('terrain',true); g.setLayer('beacons',true);`;
+  g.setLayer('snow',true); g.setLayer('terrain',true); g.setLayer('beacons',true);
+  g.setLayer('station',true);`;
 
 const SHOTS = [
   ['a-shelf',   `g.pose('shelf');`],
@@ -30,6 +31,8 @@ const SHOTS = [
   ['d-deep',    `g.pose('deep');`],
   ['e-floor',   `g.pose('floor');`],
   ['f-descent', `g.pose('descent');`],
+  ['m-catwalk', `g.pose('catwalk');`],
+  ['n-station', `g.pose('station');`],
   // Depth is a property of position now, so the ladder is shot by standing in
   // different places rather than by retuning a number — which also means each
   // rung is a real location and can be judged as a picture.
