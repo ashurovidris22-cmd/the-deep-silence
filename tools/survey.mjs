@@ -22,7 +22,9 @@ fs.mkdirSync(OUT, { recursive: true });
  * an empty starfield in the project this harness is modelled on. */
 const PRE = `g.setLayer('hud',false); g.setLayer('kelp',true); g.setLayer('rocks',true);
   g.setLayer('snow',true); g.setLayer('terrain',true); g.setLayer('beacons',true);
-  g.setLayer('station',true); g.setLayer('sub',true);`;
+  g.setLayer('station',true); g.setLayer('sub',true);
+  g.setLayer('turf',true); g.setLayer('pens',true);
+  g.setLayer('sponges',true); g.setLayer('whips',true);`;
 
 const SHOTS = [
   ['a-shelf',   `g.pose('shelf');`],
@@ -46,6 +48,30 @@ const SHOTS = [
   ['k-d4000',   `g.pose('floor'); g.setDepth(4000); g.setLamp(1);`],
   // No marine snow: if the frame looks the same, snow is not earning its cost.
   ['l-nosnow',  `g.pose('shelf'); g.setLayer('snow',false);`],
+
+  /* Flora. Three bands, three frames, plus the control.
+   *
+   * `r-noflora` is the one that matters: if the canyon floor looks the same
+   * with the new cover switched off, none of it is earning its triangles. The
+   * same test caught marine snow being invisible, which is why it is here. */
+  ['q-garden',  `g.pose('garden');`],
+  ['r-noflora', `g.pose('garden'); g.setLayer('pens',false); g.setLayer('whips',false); g.setLayer('sponges',false);`],
+  ['s-slope',   `g.pose('slope');`],
+  ['t-turf',    `g.pose('shelf'); g.setLayer('kelp',false);`],
+
+  /* Inside the boat. Being aboard is a mode rather than a viewpoint, so these
+   * go through g.inside() — which hands the camera to the walking pilot with
+   * the hull collision attached instead of teleporting it through the deck. */
+  ['u-stern',   `g.inside('stern');`],
+  ['v-board',   `g.inside('board');`],
+  ['w-plant',   `g.inside('plant');`],
+  ['x-bunks',   `g.inside('bunks');`],
+  ['y-mess',    `g.inside('mess');`],
+  ['z-galley',  `g.inside('galley');`],
+  ['A-helm',    `g.inside('helm');`],
+  ['B-chart',   `g.inside('chart');`],
+  ['C-fwd',     `g.inside('fwd');`],
+  ['D-aft',     `g.inside('aft');`],
 ];
 
 const browser = await launch();

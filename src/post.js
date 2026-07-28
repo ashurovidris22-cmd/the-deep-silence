@@ -413,7 +413,22 @@ export class Post {
           float coc = clamp((nearCoc + farCoc) * uDofAmount, 0.0, 1.0) * notCabin;
           col = mix(col, texture2D(tDof, uv).rgb, coc);
 
-          col += texture2D(tVol, uv).rgb;
+          /* In-scatter belongs to water, and there is none inside the boat.
+           *
+           * This was added unconditionally, so the volumetric integral computed
+           * for a lamp mounted on the outside of the hull was being composited
+           * over the cabin as well. The result was a milky veil across every
+           * interior frame that got stronger with distance down the compartment
+           * — exactly like fog, because it was fog, indoors.
+           *
+           * It hid for a long time because the compartments were empty: with
+           * nothing in them, a grey haze over grey plate is just grey plate.
+           * Furnishing the boat is what made it visible, which is the same
+           * lesson as the contact sheet — a defect needs something to be
+           * measured against before anyone can see it.
+           *
+           * Same alpha, same one multiply as the defocus exemption above. */
+          col += texture2D(tVol, uv).rgb * notCabin;
           col += texture2D(tBloom, uv).rgb * uBloom;
 
 /* Two exposures, selected by the same alpha that exempts the cockpit from

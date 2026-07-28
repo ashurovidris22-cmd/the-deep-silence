@@ -41,7 +41,8 @@ for (const [name, expr] of pairs) {
     first = false;
     await page.screenshot({ path: out, timeout: 180000 });
     const s = await readStats(page);
-    console.log(`  ${String(name || 'probe').padEnd(14)} -> ${out}  draws=${s.calls} ${s.depth}m`);
+    console.log(`  ${String(name || 'probe').padEnd(14)} -> ${out}`
+      + `  draws=${s.calls} tris=${(s.tris / 1000).toFixed(0)}k ${s.depth}m`);
   } catch (e) {
     console.log(`  ${String(name || 'probe').padEnd(14)} FAILED ${String(e.message).split('\n')[0]}`);
   }

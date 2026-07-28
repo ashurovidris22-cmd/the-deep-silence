@@ -35,6 +35,7 @@ export const MAT = { STEEL: M_STEEL, GRATE: M_GRATE, PIPE: M_PIPE, CONC: M_CONC,
 export class Welder {
   constructor() {
     this.pos = []; this.nrm = []; this.mat = []; this.wear = []; this.uv = []; this.idx = [];
+    this.ext = [];
     this.v = 0;
   }
 
@@ -45,9 +46,19 @@ export class Welder {
    * deck reads as ceramic tile; keyed to the panel's own axes they run along it
    * the way rolled steel actually does. Two floats a vertex to stop a handrail
    * looking like a bathroom floor. */
-  _push(x, y, z, nx, ny, nz, m, w, u = 0, v = 0) {
+  /* `ex, ey` are the face's own half-extents, in the same metres as the UV.
+   *
+   * Added because "chipped along every edge people knock" cannot be written
+   * without knowing where the edge is. Faked with fbm it produces chips in the
+   * middle of panels, which reads as dirt rather than as damage — wear is
+   * positional, and the position it cares about is the rim. With the extents in
+   * hand the shader gets `edge = 1 - min(dist to either edge)/w` for free, and
+   * that one term drives chamfers, bolt rings, recessed door panels and paint
+   * loss all at once. Two more floats a vertex to stop a locker looking like a
+   * printed box. */
+  _push(x, y, z, nx, ny, nz, m, w, u = 0, v = 0, ex = 0, ey = 0) {
     this.pos.push(x, y, z); this.nrm.push(nx, ny, nz);
-    this.mat.push(m); this.wear.push(w); this.uv.push(u, v);
+    this.mat.push(m); this.wear.push(w); this.uv.push(u, v); this.ext.push(ex, ey);
     return this.v++;
   }
 
@@ -76,11 +87,15 @@ export class Welder {
           : Math.abs(nx0) > 0.5 ? [pz, py]
             : [px, py]
       );
+      // The same two axes, as half-extents, so the shader knows where the rim is.
+      const [ex, ey] = Math.abs(ny0) > 0.5 ? [hx, hz]
+        : Math.abs(nx0) > 0.5 ? [hz, hy]
+          : [hx, hy];
       for (let k = 0; k < 4; k++) {
         const [px, py, pz] = f[k];
         const [rx, rz] = rot(px, pz);
         const [uu, vv] = uvOf(px, py, pz);
-        this._push(cx + rx, cy + py, cz + rz, rnx, ny0, rnz, m, wear, uu, vv);
+        this._push(cx + rx, cy + py, cz + rz, rnx, ny0, rnz, m, wear, uu, vv, ex, ey);
       }
       this.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
     }
@@ -111,10 +126,20 @@ export class Welder {
       };
       const n0 = ring(a0), n1 = ring(a1);
       const base = this.v;
-      this._push(x0 + n0[0] * r, y0 + n0[1] * r, z0 + n0[2] * r, n0[0], n0[1], n0[2], m, wear);
-      this._push(x0 + n1[0] * r, y0 + n1[1] * r, z0 + n1[2] * r, n1[0], n1[1], n1[2], m, wear);
-      this._push(x1 + n1[0] * r, y1 + n1[1] * r, z1 + n1[2] * r, n1[0], n1[1], n1[2], m, wear);
-      this._push(x1 + n0[0] * r, y1 + n0[1] * r, z1 + n0[2] * r, n0[0], n0[1], n0[2], m, wear);
+      /* Surface coordinates on a pipe: arc length around, metres along.
+       *
+       * These were left at zero, which meant every tube in the game — every
+       * handrail, every pipe run, the whole ladder — sampled its material at one
+       * single point and came back perfectly uniform. A pipe with no coordinate
+       * cannot have a seam weld, a flange, or scale that runs along it, so it
+       * reads as a smooth plastic rod no matter what the fragment shader does.
+       * Arc length rather than angle, so the texel size is the same on a 4 cm
+       * rung and a 30 cm main. */
+      const uA = a0 * r, uB = a1 * r, hl = len / 2;
+      this._push(x0 + n0[0] * r, y0 + n0[1] * r, z0 + n0[2] * r, n0[0], n0[1], n0[2], m, wear, uA, -hl, r * Math.PI / sides, hl);
+      this._push(x0 + n1[0] * r, y0 + n1[1] * r, z0 + n1[2] * r, n1[0], n1[1], n1[2], m, wear, uB, -hl, r * Math.PI / sides, hl);
+      this._push(x1 + n1[0] * r, y1 + n1[1] * r, z1 + n1[2] * r, n1[0], n1[1], n1[2], m, wear, uB, hl, r * Math.PI / sides, hl);
+      this._push(x1 + n0[0] * r, y1 + n0[1] * r, z1 + n0[2] * r, n0[0], n0[1], n0[2], m, wear, uA, hl, r * Math.PI / sides, hl);
       this.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
     }
   }
@@ -126,6 +151,7 @@ export class Welder {
     g.setAttribute('aMat', new THREE.Float32BufferAttribute(this.mat, 1));
     g.setAttribute('aWear', new THREE.Float32BufferAttribute(this.wear, 1));
     g.setAttribute('aUV', new THREE.Float32BufferAttribute(this.uv, 2));
+    g.setAttribute('aExt', new THREE.Float32BufferAttribute(this.ext, 2));
     g.setIndex(this.idx);
     return g;
   }

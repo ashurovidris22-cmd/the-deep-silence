@@ -46,13 +46,56 @@ olive while anything further has had the red taken out of it.
 index.html          entry point; reads state from URL params
 src/jerlov.js       seawater optics constants, depth zones, pressure
 src/glsl.js         shared GLSL: noise, the water model, phase function
-src/terrain.js      seabed heightfield (CPU, for exact normals)
+src/terrain.js      seabed heightfield (CPU, for exact normals) + the light ramp
 src/props.js        kelp and boulders — the silhouette layer
+src/flora.js        benthic cover in three depth bands
 src/snow.js         marine snow
+src/structures.js   Welder (CPU mesh builder) + the station on the canyon floor
+src/interior.js     the pressure hull and its material
+src/fitout.js       everything inside the hull
 src/post.js         HDR pipeline: volumetric, bloom, ACES, grain
 tools/              the review harness (see below)
 vendor/             three.js, vendored — no build step, no CDN at runtime
 ```
+
+## Why the canyon floor has no plants on it
+
+The brief was "vegetation on the seabed", and on the floor of a 440 m canyon
+that cannot be done. Kelp is restricted to the shelf here for a specific reason:
+a photosynthetic organism below the euphotic zone would quietly tell the player
+that none of the optics mean anything, and the absorption curve is the one thing
+in this renderer that is not art-directed.
+
+So the floor gets what actually grows there, and it looks like a garden anyway.
+Sea pens are feathers on stalks. Glass sponges are white vases. Whip corals are
+three metres of unbranched stem. All animals, all sessile, all read to the eye
+as flora, and none of them needs a photon to justify being there. The
+bioluminescent pulse that runs up a sea pen's rachis is real, and it is the only
+saturated colour the art direction permits.
+
+The band edges are a ramp rather than a threshold. A boolean photic test draws a
+shaved horizontal line across the canyon wall at a depth the player cannot
+perceive; a ramp gives the descent the transition the terrain was designed
+around — the cover thins, reddens, gives out, and after that it is rock and silt.
+
+## Why the interior needed two different fixes
+
+The complaint was that the compartments read as large flat planes. That has two
+independent causes and they fail differently:
+
+- **Nothing in the volume.** No objects at conversational distance. This is a
+  content pass, and it is `src/fitout.js`.
+- **Nothing on the surface.** The interior material had no normal perturbation at
+  all — three noise bands in the albedo and a constant normal. Albedo without
+  relief is a printed texture, and a painted plate lit by a lamp two metres away
+  is almost entirely shading.
+
+The second was invisible while reading the code, because the material *looks*
+detailed. Where geometry stops and shading starts is arithmetic: at 62° over
+720 px, a feature of size `s` at distance `d` covers `s/d * 599` pixels, so a
+12 mm bolt head is nine pixels at 0.8 m and two at three metres. Above about
+1.5 cm, model it; below, put it in a height field; either way fade the fine
+bands with distance or they alias into crawling static.
 
 Run it: serve the directory and open `index.html`. There is no build.
 
@@ -110,6 +153,19 @@ Kept because each one cost real time and each will recur.
   and empty at the same time. Population radius belongs to the water, not the map.
 - **Structured dither (IGN) needs a temporal filter.** Without one it renders as a
   visible grid. Stills are how this is judged, so use unstructured noise.
+- **The volumetric pass was fogging the inside of the boat.** In-scatter computed
+  for a lamp mounted outside the hull, composited over the cabin as well. It hid
+  for months because the compartments were empty — grey haze over grey plate is
+  grey plate. Furnishing the room is what made it visible.
+- **A relief pass can be perfectly correct and completely invisible.** The debug
+  height view showed crisp welds; the lit frame showed a flat wall. `(h(u+e) −
+  h(u))/e` is the slope when both are in metres, and it was being multiplied by
+  a fifth. Separately, honest oil-canning of 1.4 mm across a 0.6 m panel is an
+  eighth of a degree — real hulls show that through specular reflection of a
+  bright environment, and there is none at 420 m.
+- **A shader that fails to compile renders nothing and reports nothing.** One
+  duplicated variable name took out the whole interior; the survey produced
+  thirty frames and ten of them were the seabed, with the draw counts unchanged.
 
 ## Licence
 

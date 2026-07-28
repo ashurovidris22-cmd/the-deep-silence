@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { water, visibility, zoneAt, pressureAt } from './jerlov.js';
-import { buildTerrain, seabedHeight, isPhotic, SEA_LEVEL, CANYON_HALF, RIM } from './terrain.js';
+import { buildTerrain, seabedHeight, lightAt, SEA_LEVEL, CANYON_HALF, RIM } from './terrain.js';
 import { buildKelp, buildRocks } from './props.js';
+import { buildTurf, buildPens, buildSponges, buildWhips } from './flora.js';
 import { buildSnow } from './snow.js';
 import { buildStation } from './structures.js';
 import { buildSub } from './sub.js';
@@ -327,6 +328,17 @@ const CAM_SPOTS = [
   { x: 14, z: 40, r: 6 },
   // Clear of the wreck and its two camera stations.
   { x: -36, z: 46, r: 13 }, { x: -31, z: 50.2, r: 4 }, { x: -27, z: 44, r: 4 },
+  /* The two poses added with the flora, and forgetting them cost a whole
+   * review round. The `garden` frame came back as a diffuse glow with one black
+   * diagonal across it: a whip coral thirty centimetres from the lens, inside
+   * the near-focus ramp, blurred into a smear that veiled the entire shot. Its
+   * own control frame — same camera, flora switched off — was sharp and full of
+   * detail, which is what made the cause obvious and is exactly what the
+   * control frame is for.
+   *
+   * The comment at the head of this list says it is kept in sync by hand and
+   * that this is a smell. It is. This is what it smells like. */
+  { x: 10, z: 30, r: 3.4 }, { x: 262, z: 20, r: 3.0 },
 ];
 
 const terrain = buildTerrain();
@@ -336,10 +348,71 @@ const terrain = buildTerrain();
  * metres down would quietly tell the player that none of the optics mean
  * anything. Restricting it to the shelf also gives the descent a real threshold
  * — the vegetation thins out, then stops, and after that it is rock and silt. */
-const kelp = buildKelp(950, 150, CAM_SPOTS, undefined, isPhotic, { x: 430, z: 0 });
+/* Kelp density now follows the light curve instead of a boolean depth test.
+ *
+ * The old rule drew a line across the canyon wall at exactly 105 m: full canopy
+ * above it, bare rock below, on a contour the player cannot perceive and did
+ * not cross for any visible reason. Probability against `lightAt` turns that
+ * edge into a band about ninety metres deep, which is where the stand actually
+ * thins in the water this game is modelling.
+ *
+ * Hashed on position rather than drawn from a stream, deliberately. A stream
+ * makes acceptance depend on the order sites are visited, so changing the count
+ * reshuffles which plants survive; a spatial hash means a clump either grows at
+ * that spot or does not, forever, and a review frame stays comparable. */
+const siteHash = (x, z) => {
+  const v = Math.sin(x * 12.9898 + z * 78.233) * 43758.5453;
+  return v - Math.floor(v);
+};
+const kelpAccept = (x, z) => siteHash(x, z) < Math.pow(lightAt(x, z), 0.85);
+const kelp = buildKelp(950, 150, CAM_SPOTS, undefined, kelpAccept, { x: 430, z: 0 });
 const rocks = buildRocks(520, 420, CAM_SPOTS);
 const snow = buildSnow();
-scene.add(terrain, kelp, rocks, snow);
+
+/* Benthic cover, in three bands. See src/flora.js for why the canyon floor gets
+ * animals rather than plants — briefly, a photosynthetic organism 440 m down
+ * would discredit the one part of this renderer that is not art-directed.
+ *
+ * The boat needs its own clearance disc: it is eighteen metres of hull sitting
+ * on the floor, and nothing else in the scatter knows it is there. The camera
+ * discs are shrunk for the turf, because turf is ground cover and having it
+ * underfoot is the entire point — the clearance rule exists to keep a six-metre
+ * kelp blade off the lens, not a 30 cm tuft off the deck. */
+const BOAT_CLEAR = { x: 74, z: 8, r: 12 };
+const FLORA_CLEAR = [...CAM_SPOTS, BOAT_CLEAR];
+const TURF_CLEAR = CAM_SPOTS.map((c) => ({ ...c, r: c.r * 0.30 }));
+/* Counts raised roughly threefold after the first contact sheet.
+ *
+ * The garden frame and its no-flora control were nearly identical, which is the
+ * test failing: if switching the cover off does not change the picture, the
+ * cover is not earning its triangles. The cause was arithmetic — 1050 sites
+ * over a 105 m disc is one clump per 33 m², and the lamp only lights about
+ * 50 m² of floor, so a typical frame contained three plants.
+ *
+ * Density has to be set against what the lamp reaches, not against the disc. */
+/* Radii trimmed to 88 m once the counts went up, and the arithmetic is the
+ * README's own rule: population radius belongs to the water, not to the map.
+ *
+ * A 105 m disc is 34,600 m of floor; visibility on the bottom with the lamp is
+ * about twelve. Going from 105 to 88 sheds a third of the instances and cannot
+ * remove anything the player could have seen, because it still reaches the boat
+ * at (74, 8), the station at (30, -18) and the wreck at (-36, 46) — the three
+ * places there is any reason to stand. */
+/* Turf gets a small radius and a real density, which is the opposite dial from
+ * the deep flora and for the same reason.
+ *
+ * At 125 m and 2800 sites the cover worked out at 0.3 tufts per square metre —
+ * one every two metres, which is not ground cover, it is weeds. Real turf is
+ * continuous, and the only way to afford continuous is to stop paying for the
+ * 95% of a 125 m disc that no shelf camera ever sees. 58 m still covers the
+ * shelf, rim and descent stations; the density inside it goes up sevenfold for
+ * fewer triangles than before. */
+const turf = buildTurf(TURF_CLEAR, { x: 403, z: 12 }, 58, 3600);
+const pens = buildPens(FLORA_CLEAR, { x: 20, z: 8 }, 88, 8600);
+const sponges = buildSponges(FLORA_CLEAR, { x: 20, z: 8 }, 88, 1900);
+const whips = buildWhips(FLORA_CLEAR, { x: 20, z: 8 }, 88, 3000);
+
+scene.add(terrain, kelp, rocks, snow, turf, pens, sponges, whips);
 
 /* Distances are set against the water, not against the map.
  *
@@ -388,7 +461,8 @@ env.points = [
   { pos: new THREE.Vector3(-18, -393, -26), col: new THREE.Vector3(1.8, 8.5, 3.6) },
 ];
 
-for (const o of [terrain, kelp, rocks, snow, backdrop, station.mesh, sub.mesh]) env.register(o.material);
+for (const o of [terrain, kelp, rocks, snow, turf, pens, sponges, whips,
+  backdrop, station.mesh, sub.mesh]) env.register(o.material);
 env.register(beacons.userData.mat);
 
 /* -------------------------------------------------------------------- poses
@@ -448,6 +522,71 @@ const POSES = {
   station: { x: 54, z:  4, h: 7.5, yaw:  -48, pitch: -11, lamp: 1.0 },
   // High over the shelf, aimed down the slope. The descent, as a picture.
   descent: { x: 392, z:   0, h: 26,  yaw:  -92, pitch: -38, lamp: 0.45 },
+  /* The garden: low on the canyon floor among the pens.
+   *
+   * Deliberately at 1.5 m rather than standing height. These things are half a
+   * metre to a metre and a half tall, so an eye at 3 m looks down on a carpet
+   * and an eye at their own height gets them against the black — which is the
+   * only way a silhouette layer works. Same reasoning as the catwalk shot. */
+  garden:  { x:  10, z:  30, h: 1.2, yaw:  -38, pitch: -10, lamp: 1.0 },
+  /* The transition band on the wall, solved rather than guessed.
+   *
+   * lightAt crosses 0.5 where the cosine-eased wall reaches about -80 m, which
+   * the cross-section puts at roughly 250 m out from the axis. This camera sits
+   * in that band on purpose: it is the one frame that can show flora thinning
+   * with depth instead of stopping at a line, and therefore the one frame that
+   * can fail if the ramp is wrong. */
+  slope:   { x: 262, z:  20, h: 2.2, yaw:  -88, pitch: -11, lamp: 0.85 },
+};
+
+/* Interior stations. Not poses, because being inside the boat is a mode rather
+ * than a viewpoint — the camera has to be handed to the walking pilot with the
+ * hull's collision attached, or it simply falls through the deck.
+ *
+ * Given in hull-local metres. Eye height is not a free parameter here: it is
+ * DECK_Y + EYE, the same number the walk controller enforces, so a review frame
+ * is shot from exactly where a player's head actually is. */
+/* Solved from the geometry, not chosen — the bug ledger's "framing is
+ * arithmetic" applies inside the hull exactly as it does outside.
+ *
+ * For a camera at (cx, cz) looking at (tx, tz), the forward vector is
+ * (sin yaw, 0, -cos yaw), so yaw = atan2(dx, -dz) and pitch = atan2(dy, L).
+ * The first version of this table was written by eye and every close station
+ * missed: `board` pointed at bare plate a metre to the left of the switchboard,
+ * and `chart` looked past the chart table entirely. A frame that misses its
+ * subject is worse than no frame, because the reviewer reports what is in it. */
+const AIM = (cx, cz, tx, ty, tz) => {
+  const dx = tx - cx, dz = tz - cz;
+  const L = Math.hypot(dx, dz);
+  return {
+    x: cx, z: cz,
+    yaw: Math.atan2(dx, -dz) * 180 / Math.PI,
+    pitch: Math.atan2(ty - (DECK_Y + EYE), L) * 180 / Math.PI,
+  };
+};
+const INSIDE = {
+  // Down the length of the machinery space, from just inside the door.
+  stern:  { x: 0.15, z: -3.00, yaw: 0, pitch: -5 },
+  // The switchboard face, centred at DECK_Y + 1.02 on the port shell.
+  board:  AIM(-0.62, -3.55, -2.05, DECK_Y + 1.02, -3.55),
+  // The pump skid: bedplate at DECK_Y + 0.09, motor axis at DECK_Y + 0.42.
+  plant:  AIM(0.50, -3.95, -1.47, DECK_Y + 0.50, -5.70),
+  // Workbench top and the shadow board above it.
+  bench:  AIM(0.55, -6.30, -0.99, DECK_Y + 1.05, -7.50),
+  // Both berths at once, so the frame carries the tier rather than one bunk.
+  bunks:  AIM(0.92, 0.10, -1.93, DECK_Y + 0.88, 0.10),
+  mess:   AIM(-0.30, -0.75, 1.71, DECK_Y + 0.80, -0.75),
+  galley: AIM(-0.20, 1.35, 1.77, DECK_Y + 1.05, 1.35),
+  chart:  AIM(0.35, 4.95, -1.47, DECK_Y + 0.88, 5.55),
+  // The console, the sonar and the port together.
+  helm:   AIM(0.00, 6.25, 0.10, DECK_Y + 0.95, 8.20),
+  /* The long shot forward, and it had to move.
+   *
+   * It stood at z = 3.4, which is the exact z of the alarm lamp — so the camera
+   * was inside a red point source and the whole frame came back pink. Lights
+   * are geometry too; a station has to clear them like anything else. */
+  fwd:    { x: 0.00, z: 2.30, yaw: 180, pitch: -2 },
+  aft:    { x: 0.00, z: 1.50, yaw: 0, pitch: -2 },
 };
 
 let curPose = 'shelf';
@@ -581,6 +720,7 @@ function resize() {
 /* -------------------------------------------------------------------- game */
 const game = {
   started: false,
+  uiOff: false,
   depth: qNum('depth', 62),
   lampOn: qNum('lamp', 0.0),
   maxDpr: qNum('dpr', 2),
@@ -596,6 +736,24 @@ const game = {
   walk: () => enterWalk(), helm: () => enterHelm(), swim: () => enterSwim(),
   boatOrigin: () => boat.origin.clone(),
   pose: (n) => { applyPose(n); },
+  /* Put the camera at a named station inside the boat.
+   *
+   * Goes through enterWalk first so the pilot picks up the hull bounds and the
+   * furniture collision, then overrides the position. Setting the camera
+   * directly would work for one frame and then be undone, because the pilot
+   * owns the transform and re-applies it every tick — which is exactly the
+   * class of bug the "one owner of the camera" rule exists to prevent. */
+  inside: (n) => {
+    const p = INSIDE[n] || INSIDE.mess;
+    enterWalk();
+    pilot.pos.copy(boat.origin).add(new THREE.Vector3(p.x, DECK_Y + EYE, p.z));
+    pilot.setFrom(pilot.pos.clone(), p.yaw, p.pitch);
+    syncWater();
+    adaptExposure(0, true);
+  },
+  insides: () => Object.keys(INSIDE),
+  // 0 off, 1 height field, 2 perturbed normal. See the interior fragment shader.
+  dbg: (v) => { boat.mat.uniforms.uDebug.value = v; },
   /* setDepthBand already solved for the offset that yields this depth at the
    * camera's current height; assigning the raw metres afterwards threw that
    * solution away and asked for 1200 m of surface above a floor already 424 m
@@ -605,9 +763,38 @@ const game = {
   setWater: (a, b, t) => env.setWater(a, b, t),
   visibility: () => env.visibility,
   setLayer: (name, on) => {
-    const o = { kelp, rocks, snow, terrain, beacons, station: station.mesh, sub: sub.mesh, boat: boat.mesh }[name];
+    const o = { kelp, rocks, snow, terrain, beacons, turf, pens, sponges, whips,
+      station: station.mesh, sub: sub.mesh, boat: boat.mesh }[name];
     if (o) o.visible = on;
-    if (name === 'hud') document.getElementById('hud').hidden = !on;
+    /* "hud" means every scrap of interface, not just the readout.
+     *
+     * The controls legend is a separate element and was never being hidden, so
+     * every review frame in the set had a block of white text across the top
+     * left — over the exact corner where the composition's dark foreground
+     * silhouette is supposed to be. A judge shown that frame comments on the
+     * text. */
+    /* "hud" means every scrap of interface, not just the readout.
+     *
+     * The controls legend and the contextual prompt are separate elements and
+     * neither was being hidden, so every interior frame in the review set had
+     * CONTROLS across the top left and TAKE THE HELM across the middle — over
+     * the exact corner where the composition's dark foreground is supposed to
+     * be. A judge shown that frame comments on the text.
+     *
+     * The prompt needs a latch rather than a hide, because the frame loop
+     * rewrites its hidden flag every tick from proximity. Setting it false once
+     * lasts about sixteen milliseconds. */
+    if (name === 'hud') {
+      game.uiOff = !on;
+      for (const id of ['hud', 'legend']) {
+        const el = document.getElementById(id);
+        if (el) el.hidden = !on;
+      }
+      for (const id of ['stats', 'prompt']) {
+        const el = document.getElementById(id);
+        if (el && !on) el.hidden = true;
+      }
+    }
   },
   // Sample the rendered frame's colour at a set of distances. The harness uses
   // this to check the absorption curve against Jerlov numerically instead of
@@ -716,7 +903,7 @@ function frame() {
     const d = pilot.pos.distanceTo(boat.origin);
     if (d < 9) pmsg = 'V — back inside';
   }
-  if (pmsg) { ptext.textContent = pmsg; prompt.hidden = false; } else prompt.hidden = true;
+  if (pmsg && !game.uiOff) { ptext.textContent = pmsg; prompt.hidden = false; } else prompt.hidden = true;
 
   const legend = document.getElementById('legend');
   if (!legend.hidden) {

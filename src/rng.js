@@ -37,4 +37,8 @@ export const SEEDS = {
   rocks: 0x5eed0002,
   snow: 0x5eed0003,
   debris: 0x5eed0004,
+  turf: 0x5eed0005,
+  pens: 0x5eed0006,
+  sponge: 0x5eed0007,
+  whip: 0x5eed0008,
 };

@@ -102,6 +102,32 @@ export function seabedHeight(x, z) {
   return wall + gullies + benches + dunes + grain;
 }
 
+/**
+ * Downwelling light reaching the seabed at (x, z), as a 0..1 fraction.
+ *
+ * Every flora density in the game keys off this one function, and it is a ramp
+ * rather than a threshold on purpose. The boolean it replaces put a shaved
+ * horizontal line across the canyon wall wherever 105 m happened to fall —
+ * kelp, then abruptly nothing, at a depth the player has no way to perceive.
+ *
+ * A ramp instead gives the descent the threshold the terrain was designed
+ * around: the vegetation thins, reddens, gives out, and after that it is rock
+ * and silt. That transition is a full band of the wall rather than a contour,
+ * so it reads as a place rather than as an edge — and it costs one smoothstep.
+ *
+ * The numbers are the euphotic zone, not taste. Compensation depth in shelf
+ * water of this turbidity is around 1% of surface irradiance; with the Kd this
+ * game already computes that lands between roughly 70 m (where cover is still
+ * continuous) and 170 m (where nothing photosynthetic is left).
+ */
+export function lightAtDepth(d) {
+  return 1 - sstep(72, 168, d);
+}
+
+export function lightAt(x, z) {
+  return lightAtDepth(SEA_LEVEL - seabedHeight(x, z));
+}
+
 /** True where there is enough light for kelp. Used to keep flora on the shelf. */
 export function isPhotic(x, z) {
   return SEA_LEVEL - seabedHeight(x, z) < 105;
