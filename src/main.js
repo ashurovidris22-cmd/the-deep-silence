@@ -4,6 +4,7 @@ import { buildTerrain, seabedHeight } from './terrain.js';
 import { buildKelp, buildRocks } from './props.js';
 import { buildSnow } from './snow.js';
 import { Post } from './post.js';
+import { Pilot } from './controls.js';
 import { FS_VERT, WATER } from './glsl.js';
 
 const qs = new URLSearchParams(location.search);
@@ -209,13 +210,15 @@ const camera = new THREE.PerspectiveCamera(62, 1, 0.05, 900);
 
 const env = new Env();
 const post = new Post(renderer);
+const pilot = new Pilot(camera, canvas);
+pilot.toggleLamp = () => { game.lampOn = game.lampOn > 0.5 ? 0 : 1; syncWater(); };
 /* Volumetric cost is steps x resolution and nothing else, so it is the one
  * dial worth exposing. The review harness runs on a software rasteriser where
  * 32 steps at half res takes a minute a frame; real GPUs do not care. Quality
  * verdicts must still be taken at full settings — this is for iteration speed,
  * not for making the numbers look good. */
 post.matVol.uniforms.uSteps.value = qNum('vsteps', 32);
-post.volScale = qNum('vscale', 0.5);
+post.volScale = qNum('vscale', 0.7);
 renderer.info.autoReset = false; // post does many passes; count them all
 
 const backdrop = buildBackdrop(env);
@@ -307,28 +310,33 @@ function applyPose(name) {
   const p = POSES[name] || POSES.kelp;
   curPose = name;
   const y = seabedHeight(p.x, p.z) + p.h;
-  camera.position.set(p.x, y, p.z);
-  // Explicit yaw/pitch rather than lookAt: a look target moves the framing
-  // whenever the camera moves, so two poses that share a target quietly become
-  // two different shots when the terrain under them differs.
-  const yaw = p.yaw * D2R, pitch = p.pitch * D2R;
-  const dir = new THREE.Vector3(
-    Math.sin(yaw) * Math.cos(pitch),
-    Math.sin(pitch),
-    -Math.cos(yaw) * Math.cos(pitch),
-  );
-  camera.lookAt(camera.position.clone().add(dir));
-  game.depth = p.depth;
+  // The pilot owns position and orientation; the camera is downstream of it.
+  // Two owners of the camera transform is how you get a review harness whose
+  // poses drift by one frame of player input.
+  pilot.setFrom(new THREE.Vector3(p.x, y, p.z), p.yaw, p.pitch, p.depth);
   game.lampOn = p.lamp;
-  syncDepth();
+  setDepthBand(p.depth);
+  syncWater();
 }
 
-/* Depth is expressed by moving the sea surface, not the camera. The camera
- * stays near the terrain (which is authored around y=0) while `surfaceY` rises
- * far overhead — so the optics get a true 900 m of water above them without
- * needing a 900 m tall mesh or any floating-point heroics. */
-function syncDepth() {
-  env.surfaceY = camera.position.y + game.depth;
+/* Depth is expressed by moving the sea surface, not the camera.
+ *
+ * The camera stays near the terrain (authored around y=0) while `surfaceY` sits
+ * far overhead, so the optics get a true kilometre of water above them without a
+ * kilometre-tall mesh or any floating-point heroics.
+ *
+ * Crucially the surface is then left alone, and depth is *derived* from where the
+ * camera actually is. That is what makes descending mean something: sink four
+ * metres and four metres of water appear above you, the daylight term drops, and
+ * the palette shifts — with no code watching for it. Setting depth as an
+ * independent number instead would have let the two disagree, so that swimming
+ * downward changed the view without changing the water. */
+function setDepthBand(metres) {
+  env.surfaceY = camera.position.y + metres;
+}
+
+function syncWater() {
+  game.depth = Math.max(0.4, env.surfaceY - camera.position.y);
   const z = zoneAt(game.depth);
   /* Clearer with depth, not murkier.
    *
@@ -373,9 +381,10 @@ const game = {
   time: 0,
   poses: Object.keys(POSES),
   scene, camera, renderer, env, post,
+  pilot,
   pose: (n) => { applyPose(n); },
-  setDepth: (m) => { game.depth = m; syncDepth(); },
-  setLamp: (v) => { game.lampOn = v; syncDepth(); },
+  setDepth: (m) => { setDepthBand(m); pilot.band = m; pilot.bandTarget = m; syncWater(); },
+  setLamp: (v) => { game.lampOn = v; syncWater(); },
   setWater: (a, b, t) => env.setWater(a, b, t),
   visibility: () => env.visibility,
   setLayer: (name, on) => {
@@ -408,6 +417,16 @@ function frame() {
 
   const dt = Math.min(clock.getDelta(), 0.1);
   game.time += dt;
+
+  // Pilot first: everything downstream reads the camera, so it has to be final
+  // before the water is evaluated or the fog lags the view by a frame.
+  const bandBefore = pilot.band;
+  pilot.update(dt);
+  // A change of band moves the surface with the vehicle, so the dive control
+  // adds water overhead rather than teleporting the seabed.
+  env.surfaceY += pilot.band - bandBefore;
+  syncWater();
+
   env.tick(game.time);
 
   /* Lamp rides the housing, not the eye.
@@ -454,12 +473,15 @@ function frame() {
   const hud = document.getElementById('hud');
   if (!hud.hidden) {
     document.getElementById('hDepth').textContent = Math.round(game.depth);
+    document.getElementById('hHull').textContent = Math.round(game.pressure);
+    document.getElementById('hSpeed').textContent = pilot.speed.toFixed(1);
   }
   const st = document.getElementById('stats');
   if (!st.hidden) {
     st.textContent = `${game.fps.toFixed(0)} fps  ${W}x${H}\n`
       + `${curPose}  ${Math.round(game.depth)} m  ${game.zone}\n`
-      + `vis ${env.visibility.toFixed(1)} m  ${game.pressure.toFixed(0)} atm`;
+      + `vis ${env.visibility.toFixed(1)} m  ${game.pressure.toFixed(0)} atm\n`
+      + `${pilot.speed.toFixed(2)} m/s  band ${Math.round(pilot.band)} m`;
   }
 }
 
@@ -471,10 +493,21 @@ function begin() {
   if (qStr('stats', '0') === '1') document.getElementById('stats').hidden = false;
   game.started = true;
   clock.getDelta();
+
+  /* Piloting stays off unless a human asked for it.
+   *
+   * The review harness boots with auto=1 and then poses the camera itself. If
+   * input were live by default, a latched key or a stray pointer event would
+   * move the camera between the pose and the shutter, and every frame in the
+   * set would be subtly framed differently from the one it is compared against. */
+  if (qStr('fly', '1') === '1' && qStr('auto', '0') !== '1') {
+    pilot.enabled = true;
+    canvas.requestPointerLock?.();
+  }
 }
 
 applyPose(qStr('pose', 'kelp'));
-if (qs.has('depth')) { game.depth = qNum('depth', 62); syncDepth(); }
+if (qs.has('depth')) game.setDepth(qNum('depth', 38));
 resize();
 
 // Warm the shaders before showing the button. A first frame that takes two

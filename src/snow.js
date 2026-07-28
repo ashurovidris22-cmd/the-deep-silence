@@ -13,7 +13,7 @@ import { rng, SEEDS } from './rng.js';
  * Distributed in a box that follows the camera and wraps, so density is
  * constant no matter where you are and no particle is ever wasted off-screen.
  */
-export function buildSnow(count = 5200, box = 46, seed = SEEDS.snow) {
+export function buildSnow(count = 6800, box = 46, seed = SEEDS.snow) {
   const rand = rng(seed);
   const g = new THREE.BufferGeometry();
   const pos = new Float32Array(count * 3);
