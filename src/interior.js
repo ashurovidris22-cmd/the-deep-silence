@@ -74,6 +74,13 @@ function interiorMaterial(atlas) {
       uEye: { value: new THREE.Vector3() },   // camera in hull-local space
       uAtlas: { value: atlas },
       uDebug: { value: 0 },
+      // Live vessel state, one scalar per dial. See the GAUGE branch.
+      uWay: { value: 0 },
+      uDepth: { value: 0 },
+      uHeading: { value: 0 },
+      uBallast: { value: 0.5 },
+      uTrim: { value: 0 },
+      uAir: { value: 1 },
     },
     vertexShader: /* glsl */`
       attribute float aMat; attribute float aWear; attribute vec2 aUV; attribute vec2 aExt;
@@ -93,6 +100,7 @@ function interiorMaterial(atlas) {
       uniform vec3 uEye;
       uniform sampler2D uAtlas;
       uniform float uDebug;
+      uniform float uWay, uHeading, uBallast, uTrim, uAir, uDepth;
 
       const float PI = 3.14159265;
 
@@ -402,19 +410,47 @@ function interiorMaterial(atlas) {
           gloss = mix(70.0, 10.0, vWear);
 
         } else if (m > 2.5 && m < 3.5) {
-          // Instrument face. Needle driven by the real pressure, as before.
+          /* Instrument face. Six dials, six different quantities.
+           *
+           * Every gauge in the boat used to read uPressure, so the machinery
+           * space had three identical needles at an identical angle and the
+           * helm had three more. Six instruments agreeing perfectly is not
+           * redundancy, it is a statement that none of them is connected to
+           * anything — and a player reads that instantly even if they could not
+           * say why. The wear attribute is meaningless on a glass dial, so it
+           * carries the type. */
           vec2 g = vUV * 2.0 - 1.0;
           if (length(g) > 1.0) discard;
+          int gt = int(vWear * 8.0 + 0.5);
+          float frac = 0.0;
+          bool compass = false;
+          if (gt == 0)      frac = clamp(uPressure / 620.0, 0.0, 1.05);   // sea pressure
+          else if (gt == 1) frac = clamp(uDepth / 1200.0, 0.0, 1.05);        // depth
+          else if (gt == 2) frac = clamp(uBallast, 0.0, 1.0);             // tank state
+          else if (gt == 3) { frac = fract(uHeading / 360.0); compass = true; }
+          else if (gt == 4) frac = clamp(uTrim * 0.5 + 0.5, 0.0, 1.0);    // rate of change of depth
+          else              frac = clamp((uWay + 1.5) / 6.5, 0.0, 1.05);  // way through the water
+
           col = vec3(0.028, 0.032, 0.034);
           float ang = atan(g.y, g.x), r = length(g);
-          float ticks = abs(fract((ang + 3.14159)/6.2832 * 24.0) - 0.5) * 2.0;
+          float nDiv = compass ? 36.0 : 24.0;
+          float ticks = abs(fract((ang + 3.14159)/6.2832 * nDiv) - 0.5) * 2.0;
           col += vec3(0.28,0.32,0.31) * smoothstep(0.86,0.98,ticks) * smoothstep(0.62,0.72,r) * (1.0-smoothstep(0.88,0.96,r));
-          float frac = clamp(uPressure / 620.0, 0.0, 1.05);
-          float na = -2.356 + frac * 4.712;
+          /* A compass reads all the way round; everything else sweeps 270
+           * degrees between two stops, because a dial with a dead sector tells
+           * you at a glance which way is "more". */
+          float na = compass ? (1.5708 - frac * 6.2832) : (-2.356 + frac * 4.712);
           vec2 nd = vec2(cos(na), sin(na));
           float across = abs(g.x*nd.y - g.y*nd.x), along = dot(g, nd);
           float needle = (along > -0.06 && along < 0.82) ? smoothstep(0.055,0.012,across) : 0.0;
-          col += mix(vec3(0.85,0.86,0.82), vec3(1.0,0.28,0.16), smoothstep(0.72,1.0,frac)) * needle * 1.6;
+          vec3 nCol = compass ? vec3(0.92,0.36,0.22)
+                              : mix(vec3(0.85,0.86,0.82), vec3(1.0,0.28,0.16), smoothstep(0.72,1.0,frac));
+          col += nCol * needle * 1.6;
+          // A red arc over the last fifth of the scale on the pressure dial.
+          if (gt == 0) {
+            float redA = smoothstep(0.80, 0.82, (ang + 2.356) / 4.712);
+            col += vec3(0.35,0.05,0.03) * redA * smoothstep(0.74,0.80,r) * (1.0-smoothstep(0.86,0.92,r));
+          }
           emis = 0.9;
 
         } else if (m > 3.5 && m < 4.5) {
@@ -855,7 +891,14 @@ export function buildInterior() {
    * collision then works directly in hull coordinates with no inverse transform
    * anywhere in the movement code. */
   const ox = 74, oz = 8;
-  const oy = seabedHeight(ox, oz) + 2.5;
+  /* Launched with water under the keel, not resting in it.
+   *
+   * At +2.5 the keel sits ten centimetres *below* the contact height, so the
+   * vessel spawned aground: the bottom-contact branch fired on frame one and
+   * its scrape drag ate the thrust, which read as a boat that would not move.
+   * The hull half-section is 2.35 and the contact margin 0.15, so anything
+   * under about 2.75 starts dug in. */
+  const oy = seabedHeight(ox, oz) + 3.4;
   mesh.position.set(ox, oy, oz);
   mesh.updateMatrix();
   mesh.matrixAutoUpdate = false;

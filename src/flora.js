@@ -170,6 +170,109 @@ function instance(base, sites, attrs) {
   return geo;
 }
 
+/* ---------------------------------------------------------------- texture
+ *
+ * Baked on a canvas at boot, the same trick the boat's stencils use, and for
+ * the same reason: some things are texture, not shading. A sea pen's surface is
+ * hundreds of individual polyps in rows along each pinnule, at a scale of two
+ * or three millimetres. There is no triangle budget that reaches that and no
+ * noise function that produces rows of discrete mouths rather than a mottle.
+ *
+ * Runtime-generated, so the project's no-external-assets rule still holds — the
+ * rule is about shipping files, not about pixels.
+ *
+ *   0.00-0.50 u : pen tissue, polyp rows along a translucent membrane
+ *   0.50-0.75 u : bamboo-coral banding, calcite nodes and horny internodes
+ *   0.75-1.00 u : hexactinellid spicule mesh, irregular, with a dermal skin
+ */
+export function buildFloraAtlas() {
+  const S = 1024;
+  const cv = document.createElement('canvas');
+  cv.width = S; cv.height = S;
+  const g = cv.getContext('2d');
+  g.fillStyle = '#000'; g.fillRect(0, 0, S, S);
+
+  /* --- pen tissue. Two rows of polyps per pinnule, offset, each with a darker
+   * mouth and a pale rim — that rim is what catches a lamp and turns a flat
+   * blade into something with hundreds of small openings on it. */
+  const W = S * 0.5;
+  const grd = g.createLinearGradient(0, 0, 0, S);
+  grd.addColorStop(0, '#4a3428'); grd.addColorStop(0.55, '#6b4a38'); grd.addColorStop(1, '#8a6a52');
+  g.fillStyle = grd; g.fillRect(0, 0, W, S);
+  for (let row = 0; row < 26; row++) {
+    const y = (row + 0.5) * (S / 26);
+    for (let i = 0; i < 34; i++) {
+      const x = (i + (row % 2 ? 0.5 : 0)) * (W / 34) + 6;
+      const r = 5.5 + 2.2 * Math.sin(i * 1.7 + row);
+      g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2);
+      g.fillStyle = 'rgba(232,208,186,0.55)'; g.fill();
+      g.beginPath(); g.arc(x, y, r * 0.45, 0, Math.PI * 2);
+      g.fillStyle = 'rgba(24,14,10,0.85)'; g.fill();
+    }
+  }
+  // Longitudinal fibre, so the tissue has a grain across the polyp rows.
+  g.globalAlpha = 0.22; g.strokeStyle = '#2b1c14'; g.lineWidth = 1.4;
+  for (let i = 0; i < 90; i++) {
+    g.beginPath(); g.moveTo((i / 90) * W, 0); g.lineTo((i / 90) * W + 14, S); g.stroke();
+  }
+  g.globalAlpha = 1;
+
+  /* --- bamboo coral. Calcite internodes are pale and glassy; the joints
+   * between them are dark horny gorgonin, and that alternation is where the
+   * common name comes from. */
+  const x0 = W, bw = S * 0.25;
+  g.fillStyle = '#0e1113'; g.fillRect(x0, 0, bw, S);
+  for (let i = 0; i < 30; i++) {
+    const y = (i / 30) * S, h = S / 30;
+    g.fillStyle = i % 2 ? '#20262a' : '#b9bcae';
+    g.fillRect(x0, y, bw, h * (i % 2 ? 0.34 : 0.66));
+  }
+  for (let i = 0; i < 220; i++) {              // polyps down one side
+    const y = (i / 220) * S;
+    g.beginPath(); g.arc(x0 + bw * (0.18 + 0.64 * ((i * 7) % 5) / 5), y, 3.2, 0, Math.PI * 2);
+    g.fillStyle = 'rgba(196,214,198,0.5)'; g.fill();
+  }
+
+  /* --- glass sponge skeleton. Irregular, because a real one is: spicules fuse
+   * where they happen to touch, so the openings vary by a factor of three and
+   * no two are the same shape. A perfect diamond grid reads as fishnet, which
+   * is exactly what the first version looked like. */
+  const x1 = S * 0.75, sw = S * 0.25;
+  g.fillStyle = 'rgba(26,32,34,1)'; g.fillRect(x1, 0, sw, S);
+  const jitter = (i, j, k) => {
+    const n = Math.sin(i * 12.9898 + j * 78.233 + k * 3.1) * 43758.5453;
+    return n - Math.floor(n);
+  };
+  g.strokeStyle = 'rgba(206,216,214,0.85)';
+  const NX = 9, NY = 34;
+  const px = (i, j) => x1 + (i + 0.5 + (jitter(i, j, 1) - 0.5) * 0.55) * (sw / NX);
+  const py = (i, j) => (j + 0.5 + (jitter(i, j, 2) - 0.5) * 0.55) * (S / NY);
+  for (let j = 0; j < NY; j++) {
+    for (let i = 0; i < NX; i++) {
+      g.lineWidth = 1.6 + 2.4 * jitter(i, j, 3);
+      g.beginPath(); g.moveTo(px(i, j), py(i, j));
+      g.lineTo(px((i + 1) % NX, j), py((i + 1) % NX, j)); g.stroke();
+      g.beginPath(); g.moveTo(px(i, j), py(i, j));
+      g.lineTo(px(i, (j + 1) % NY), py(i, (j + 1) % NY)); g.stroke();
+      if (jitter(i, j, 4) > 0.62) {            // occasional diagonal strut
+        g.lineWidth = 1.2;
+        g.beginPath(); g.moveTo(px(i, j), py(i, j));
+        g.lineTo(px((i + 1) % NX, (j + 1) % NY), py((i + 1) % NX, (j + 1) % NY)); g.stroke();
+      }
+    }
+  }
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.anisotropy = 8;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+let FLORA_TEX = null;
+const floraTex = () => (FLORA_TEX || (FLORA_TEX = buildFloraAtlas()));
+
 /* ------------------------------------------------------------------- turf
  *
  * The understory, and the thing the shelf was actually missing.
@@ -266,7 +369,7 @@ export function buildTurf(clear = [], centre = { x: 403, z: 12 }, radius = 58, s
         vec3 lit = alb * uLampCol * (ndl + trans) * atten * cone * lampTransmit(dL);
         vec3 day = ambientAt(vW.y);
         lit += alb * day * (0.20 + 0.62*vUp);
-        lit += alb * day * caustic(vW.xz, uTime) * 1.5 * vUp;
+        lit += alb * sunAt(vW.y) * caustic(vW.xz, uTime) * 1.5 * vUp;
         gl_FragColor = vec4(applyWater(lit, vW), 1.0);
       }`,
   });
@@ -312,25 +415,55 @@ function penGeometry() {
     face(a, b, c, d);
   }
 
-  /* Pinnules. Longest in the middle, short at both ends — a feather, not a comb.
-   * The sine over the run is what gives the whole thing its leaf silhouette, and
-   * it is the difference between "sea pen" and "bottle brush". */
-  const N = 11;
+  /* Pinnules, and the first version of these was the single worst thing in the
+   * game to look at.
+   *
+   * Eleven pairs of straight rigid bars at a fixed angle does not read as a sea
+   * pen; it reads as a fish skeleton, or a bare fir tree, which is exactly what
+   * a player photographed and sent back. Three things were wrong and all three
+   * are geometry rather than shading:
+   *
+   *   too few   — a pennatulacean has dozens of pinnules forming a continuous
+   *               blade, not a comb you can count the teeth of
+   *   too rigid — each one is a soft curved leaf that sweeps up and back; a
+   *               straight bar is the pose of something dead
+   *   too even  — constant width along the pinnule makes a plank. They taper to
+   *               a point and are widest a third of the way out
+   *
+   * Two segments per pinnule is the minimum that can carry a curve, and the
+   * curve is what does most of the work. Eighteen pairs at 84 triangles a plant
+   * against eleven pairs at 54 — a fifty per cent increase for something that
+   * stops being unrecognisable. */
+  const N = 18;
   for (let i = 0; i < N; i++) {
     const f = i / (N - 1);
-    const t = 0.20 + f * 0.76;
-    const L = 0.34 * Math.sin(Math.PI * Math.pow(f, 0.80)) + 0.02;
-    for (const s of [-1, 1]) {
-      const x0 = s * 0.020, x1 = s * L;
-      const y0 = t, y1 = t + L * 0.62;
-      // Slight thickness offset in Z so the two rows do not coincide as one plane.
-      const zo = s * 0.008;
-      const nz = s * 0.35;
-      const a = put(x0, y0, -zo, 0.0, -0.30, nz, 0, t);
-      const b = put(x0, y0 + 0.030, zo, 0.0, 0.30, nz, 0, t);
-      const c = put(x1, y1 + 0.014, zo * 0.6, 0.0, 0.30, nz, 1, t);
-      const d = put(x1, y1, -zo * 0.6, 0.0, -0.30, nz, 1, t);
-      face(a, b, c, d);
+    const t = 0.14 + f * 0.84;
+    /* Leaf profile, not a sine. Fullest at a third of the height and drawn out
+     * to a long point, which is the outline of every pennatulacean plate in
+     * every monograph — and quite different from the symmetric lens a plain
+     * sine gives. */
+    const L = 0.40 * Math.pow(Math.sin(Math.PI * Math.pow(f, 0.62)), 1.15) + 0.015;
+    for (const sd of [-1, 1]) {
+      const zo = sd * 0.010;
+      // Two segments, sweeping up and curling back toward the tip of the plant.
+      const pts = [0, 0.5, 1].map((u) => {
+        const bend = u * u;                       // curl grows toward the tip
+        return {
+          x: sd * (0.018 + L * u * (1 - 0.22 * bend)),
+          y: t + L * (0.55 * u + 0.42 * bend),
+          w: 0.034 * (1 - Math.pow(u, 1.6)) * (0.55 + 0.45 * Math.sin(Math.PI * (0.25 + 0.75 * u))),
+          u,
+        };
+      });
+      for (let k = 0; k < 2; k++) {
+        const p0 = pts[k], p1 = pts[k + 1];
+        const nz = sd * 0.35;
+        const a = put(p0.x, p0.y - p0.w, -zo, 0.0, -0.30, nz, p0.u, t);
+        const b = put(p0.x, p0.y + p0.w, zo, 0.0, 0.30, nz, p0.u, t);
+        const c = put(p1.x, p1.y + p1.w, zo * 0.6, 0.0, 0.30, nz, p1.u, t);
+        const d = put(p1.x, p1.y - p1.w, -zo * 0.6, 0.0, -0.30, nz, p1.u, t);
+        face(a, b, c, d);
+      }
     }
   }
 
@@ -385,7 +518,7 @@ export function buildPens(clear = [], centre = { x: 20, z: 8 }, radius = 105, si
 
   const mat = new THREE.ShaderMaterial({
     side: THREE.DoubleSide,
-    uniforms: COMMON_UNIFORMS(),
+    uniforms: { ...COMMON_UNIFORMS(), uTex: { value: floraTex() } },
     vertexShader: /* glsl */`
       attribute vec3 aPos; attribute vec2 aSize; attribute float aYaw; attribute vec2 aVar;
       uniform float uTime;
@@ -417,23 +550,42 @@ export function buildPens(clear = [], centre = { x: 20, z: 8 }, radius = 105, si
       varying float vPh; varying float vGlow;
       uniform vec3 uLampPos, uLampDir, uLampCol; uniform float uLampInt, uLampCos, uLampSoft;
       uniform float uTime;
+      uniform sampler2D uTex;
       void main(){
         /* Flesh, not plant. Sea pens are pale orange to dusty pink, and getting
          * that right is what stops the floor looking like a lawn that forgot to
          * die: this is the one place in the game where something soft and warm
-         * is growing out of cold grey silt, and the colour has to say so. */
-        /* Darker than the silt they stand in, not brighter.
+         * is growing out of cold grey silt, and the colour has to say so.
          *
-         * The first values put the albedo above the sediment's 0.216 once the
-         * transmission term was added, so every pen inside the lamp pool
-         * clipped to a flat white feather with no tissue in it — brighter than
-         * the ground it was supposed to be silhouetted against, which inverts
-         * the whole composition. Measured against the seabed rather than picked
-         * for prettiness. */
+         * Darker than the silt they stand in, though, not brighter. The first
+         * values put the albedo above the sediment's 0.216 once transmission
+         * was added, so every pen inside the lamp pool clipped to a flat white
+         * feather — brighter than the ground it was supposed to be silhouetted
+         * against, which inverts the whole composition. */
+        float dist = length(cameraPosition - vW);
+        float near = exp(-dist * 0.30);
+
+        /* Polyps, from the baked sheet. This is the whole answer to "it reads as
+         * a black cut-out": a pinnule is not a surface, it is two rows of small
+         * open mouths on a translucent membrane, and at two metres those mouths
+         * are four pixels across and completely legible. Faded out with distance
+         * so they never alias into a crawl. */
+        vec3 tx = texture2D(uTex, vec2(vAcross * 0.47 + 0.01, vUp * 2.6 + vPh * 0.11)).rgb;
+        float polyp = dot(tx, vec3(0.33));
+
         vec3 warm = mix(vec3(0.106,0.062,0.049), vec3(0.142,0.090,0.068), fract(vPh*0.41));
         vec3 pale = vec3(0.094,0.088,0.084);
         vec3 alb = mix(pale, warm, 0.35 + 0.65*vAcross);
         alb *= 0.72 + 0.42 * vUp;
+        /* The polyp sheet modulates the tissue, it does not brighten it.
+         * At a gain of 1.35 the lit face went above the sediment's albedo again
+         * and the whole plant clipped to white inside the lamp pool — the same
+         * inversion the colour was pulled down for in the first place, walked
+         * straight back in by a texture. */
+        alb = mix(alb, alb * (0.62 + 0.62 * polyp), near * 0.85);
+        // The growing tip is unpigmented, which is true and also gives the
+        // silhouette a light end so it does not terminate in a hard black point.
+        alb = mix(alb, alb * 1.35 + vec3(0.008, 0.007, 0.007), smoothstep(0.86, 1.0, vUp) * 0.7);
 
         vec3  toL = uLampPos - vW;
         float dL  = length(toL);
@@ -444,7 +596,17 @@ export function buildPens(clear = [], centre = { x: 20, z: 8 }, radius = 105, si
         // Thin tissue: a pinnule lit from behind glows along its whole length.
         float trans = pow(max(dot(-vN, L), 0.0), 1.6) * 0.42;
         vec3 lit = alb * uLampCol * (ndl + trans) * atten * cone * lampTransmit(dL);
-        lit += alb * ambientAt(vW.y) * (0.30 + 0.50*vUp);
+        /* Wrapped ambient, and it is what stops these being pure silhouettes.
+         *
+         * With a hard N.L against a single lamp, every pen outside the beam
+         * came back as a flat black shape with no interior at all — the reason
+         * the field looked like paper cut-outs. Soft tissue in a scattering
+         * medium is lit from every direction at once, faintly, and putting even
+         * a little of that back gives the blade a gradient across its width,
+         * which is all the eye needs to read it as a volume. */
+        vec3 amb = ambientAt(vW.y);
+        lit += alb * amb * (0.34 + 0.46*vUp) * (0.55 + 0.45 * abs(vN.y));
+        lit += alb * amb * 0.26 * (0.5 + 0.5 * dot(vN, normalize(cameraPosition - vW)));
 
         /* Bioluminescence: a wave running up the rachis, on a long period.
          *
@@ -545,7 +707,7 @@ export function buildSponges(clear = [], centre = { x: 20, z: 8 }, radius = 105,
 
   const mat = new THREE.ShaderMaterial({
     side: THREE.DoubleSide,
-    uniforms: COMMON_UNIFORMS(),
+    uniforms: { ...COMMON_UNIFORMS(), uTex: { value: floraTex() } },
     vertexShader: /* glsl */`
       attribute vec3 aPos; attribute vec2 aSize; attribute float aYaw; attribute float aVar;
       varying vec3 vW; varying vec3 vN; varying vec2 vUV; varying float vVar;
@@ -567,21 +729,22 @@ export function buildSponges(clear = [], centre = { x: 20, z: 8 }, radius = 105,
       ${WATER}
       varying vec3 vW; varying vec3 vN; varying vec2 vUV; varying float vVar;
       uniform vec3 uLampPos, uLampDir, uLampCol; uniform float uLampInt, uLampCos, uLampSoft;
+      uniform sampler2D uTex;
       void main(){
         float dist = length(cameraPosition - vW);
         float fine = exp(-dist * 0.42);
 
-        /* The skeleton, drawn rather than modelled.
+        /* The skeleton, drawn rather than modelled — but no longer as a perfect
+         * diamond lattice.
          *
-         * A hexactinellid is a woven cage of silica spicules with holes through
-         * it, at a scale of a few millimetres — no triangle budget reaches that
-         * and it is the entire identity of the animal. Two crossed lattices in
-         * the albedo, faded out by distance so they never alias, give the read
-         * for nothing: near, it is basketwork; far, it is a pale vase. */
-        vec2 q = vec2(vUV.x * 26.0, vUV.y * 15.0);
-        float lx = abs(fract(q.x + q.y * 0.5) - 0.5) * 2.0;
-        float ly = abs(fract(q.x - q.y * 0.5) - 0.5) * 2.0;
-        float mesh = max(smoothstep(0.55, 0.95, lx), smoothstep(0.55, 0.95, ly));
+         * Two crossed sine grids gave a flawless rhombic net, and a player
+         * called it exactly what it looked like: a fishnet stocking. A real
+         * hexactinellid cage is fused where spicules happened to touch, so the
+         * openings vary by a factor of three and no two are the same shape.
+         * That irregularity is the whole recognition cue, and it is much easier
+         * to draw once on a canvas than to fake with more octaves of noise. */
+        vec3 tx = texture2D(uTex, vec2(0.755 + fract(vUV.x * 2.0) * 0.24, vUV.y * 1.4)).rgb;
+        float mesh = dot(tx, vec3(0.33));
 
         vec3 alb = mix(vec3(0.300,0.318,0.322), vec3(0.196,0.212,0.222), 1.0 - mesh);
         alb *= 0.80 + 0.34 * fbm(vUV * vec2(8.0, 5.0), 3);
@@ -659,7 +822,7 @@ export function buildWhips(clear = [], centre = { x: 20, z: 8 }, radius = 105, s
 
   const mat = new THREE.ShaderMaterial({
     side: THREE.DoubleSide,
-    uniforms: COMMON_UNIFORMS(),
+    uniforms: { ...COMMON_UNIFORMS(), uTex: { value: floraTex() } },
     vertexShader: /* glsl */`
       attribute vec3 aPos; attribute vec2 aSize; attribute float aYaw; attribute vec2 aVar;
       uniform float uTime;
@@ -693,17 +856,22 @@ export function buildWhips(clear = [], centre = { x: 20, z: 8 }, radius = 105, s
       varying vec3 vW; varying vec3 vN; varying float vUp; varying float vPh;
       uniform vec3 uLampPos, uLampDir, uLampCol; uniform float uLampInt, uLampCos, uLampSoft;
       uniform float uTime;
+      uniform sampler2D uTex;
       void main(){
         /* Banded, because bamboo coral is: alternating nodes of calcite and dark
          * horny gorgonin, which is where the common name comes from. It is also
          * the only length-wise pattern on the canyon floor, so it reads as scale
-         * the moment the lamp crosses one. */
-        float band = smoothstep(0.35, 0.65, abs(fract(vUp * 26.0 + vPh) - 0.5) * 2.0);
+         * the moment the lamp crosses one — and it is the difference between a
+         * coral and a wire, which is what these looked like before. */
+        float dist = length(cameraPosition - vW);
+        float near = exp(-dist * 0.26);
+        vec3 tx = texture2D(uTex, vec2(0.505 + fract(vPh * 0.7) * 0.23, vUp * 3.2 + vPh)).rgb;
+        float band = dot(tx, vec3(0.33));
         vec3 alb = mix(vec3(0.030,0.034,0.036), vec3(0.128,0.126,0.116), band);
         alb *= 0.60 + 0.55 * vUp;
         // Polyps: a fine stipple along the stem, visible only up close.
         float polyp = smoothstep(0.72, 0.95, vnoise(vec2(vUp * 90.0, vPh * 7.0)));
-        alb += vec3(0.040,0.046,0.040) * polyp;
+        alb += vec3(0.040,0.046,0.040) * polyp * near;
 
         vec3  toL = uLampPos - vW;
         float dL  = length(toL);

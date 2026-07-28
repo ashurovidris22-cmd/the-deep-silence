@@ -292,8 +292,17 @@ export function buildTerrain(size = 1200, seg = 480) {
          * a vertical wall is a decal.
          *
          * (No backticks in here: this is inside a JS template literal.) */
+        /* Keyed to sunAt, not to the full ambient.
+         *
+         * The daylight vector above is ambientAt, which includes the bio floor and
+         * therefore never reaches zero — so this term kept drawing a sunlight
+         * caustic web on the canyon floor four hundred metres below the last
+         * photon. The comment above promised it would be "simply absent" down
+         * there and it was not, which is the worst kind of bug: the intent was
+         * written down, the code contradicted it, and the frame looked
+         * plausible enough that nobody checked. */
         float caus = caustic(vW.xz, uTime) * smoothstep(0.15, 0.75, n.y);
-        lit += alb * daylight * caus * 2.4;
+        lit += alb * sunAt(vW.y) * caus * 2.4;
 
         gl_FragColor = vec4(applyWater(lit, vW), 1.0);
       }`,

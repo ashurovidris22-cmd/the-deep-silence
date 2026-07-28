@@ -53,10 +53,34 @@ src/snow.js         marine snow
 src/structures.js   Welder (CPU mesh builder) + the station on the canyon floor
 src/interior.js     the pressure hull and its material
 src/fitout.js       everything inside the hull
+src/vessel.js       the boat as a body: throttle, rudder, ballast, bottom contact
 src/post.js         HDR pipeline: volumetric, bloom, ACES, grain
 tools/              the review harness (see below)
 vendor/             three.js, vendored — no build step, no CDN at runtime
 ```
+
+## Driving her
+
+Take the seat at the bow with **E**, and then:
+
+| key | |
+|---|---|
+| `W` / `S` | telegraph ahead / astern — a **setting**, not a key you hold |
+| `A` / `D` | wheel to port / starboard, springs amidships when released |
+| `Space` / `C` | blow / flood ballast — the tank answers in about eight seconds |
+| `Shift` | move the telegraph faster |
+| `X` | all stop |
+| `E` | stand up. She keeps whatever way you left on |
+
+Three things make her a vessel rather than a flying box. Vertical is ballast,
+not thrust, so every depth command is committed long before it answers. A rudder
+does nothing at rest, because steering authority comes from the water going past
+the blade. And nothing stops when you let go — set a throttle, walk aft to look
+at the pumps, and she is still making way toward whatever is in front of her.
+
+Walking happens in the hull's own coordinates now, with the camera composed
+through the vessel's matrix, which is what lets the deck move and turn under
+your feet.
 
 ## Why the canyon floor has no plants on it
 

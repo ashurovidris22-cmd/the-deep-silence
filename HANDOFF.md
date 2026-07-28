@@ -218,6 +218,54 @@ messages, at more length.
   atan2(dy, L)` — the interior station table uses an `AIM()` helper for exactly
   this, after the hand-written version missed its subject at every close range.
 
+### Added by the piloting pass
+
+- **Caustics were riding on the bio floor, so they never switched off.**
+  `ambientAt()` returns sunlight *plus* the constant bio/thermal glow, and the
+  terrain, rocks, turf and the volumetric shafts all keyed their sun effects to
+  it. The terrain shader's own comment promised the caustic web would be
+  "simply absent on the canyon floor, because that is what happens to the beam
+  that makes them" — and there it was at 425 m, a sunlight caustic a hundred and
+  fifty metres below the last photon. Split into `sunAt()` (beam only) and
+  `ambientAt()` (everything there is to see by). **The intent was written down,
+  the code contradicted it, and the frame looked plausible enough that nobody
+  checked for months.**
+- **The exposure meter and the renderer disagreed about how much light existed.**
+  The meter modelled only the daylight term. Below the photic zone that term is
+  exactly zero and the bio floor is a hundred per cent of the light, so the
+  meter believed it was exposing pure black while the renderer handed it a lit
+  scene. Include the floor.
+- **Adaptation was symmetric and therefore blinding on the way up.** Measured:
+  rise from the floor and the frame reads 250,252,252. A real eye adapts to
+  light in under a second and to dark over minutes; one 1.5 s constant for both
+  is what produced the whiteout the notes already recorded as "I nearly went
+  blind while ascending". Now 0.30 s closing down, 3.0 s opening up.
+- **A camera pose has to leave the hull's frame.** Once the pilot could stand in
+  a moving vessel, `applyPose` had to clear `pilot.frame` — otherwise the pose's
+  world coordinates were treated as hull-local and added to the boat, putting
+  every external review frame at 808 m in a canyon that is 425 m deep. **The
+  picture looked entirely plausible; only the depth readout caught it**, which
+  is the argument for printing numbers next to every frame.
+- **A hull pushed straight up out of the ground is a ratchet.** Resolving bottom
+  contact by lifting the boat by its penetration, with the horizontal velocity
+  left alone, let her drive into the canyon wall and climb it — 350 m in three
+  simulated minutes, surfacing at the top. Remove the velocity component going
+  into the slope normal instead; a bank can then be driven over and a wall stops
+  her dead.
+- **The sandbox cannot measure anything with a time constant in it.** Under
+  software rendering the page runs at one or two frames a second with `dt`
+  clamped to 0.1, so eight seconds of wall clock is under a second of simulated
+  time. Every dynamics test — adaptation, acceleration, ballast — has to be run
+  as pure maths in node at a fixed 60 Hz. `Vessel` has no renderer dependency
+  for exactly this reason.
+- **`texture2D` returns a vec4.** Assigning it to a vec3 is a compile error, and
+  the whole material silently vanishes.
+- **Six instruments that agree perfectly are not redundancy.** Every gauge in the
+  boat read `uPressure`, so three needles in the machinery space and three at
+  the helm stood at identical angles. A player reads that instantly as "none of
+  these is connected to anything". The wear attribute is meaningless on a glass
+  dial, so it now carries the dial's type.
+
 ### Added by the fit-out and flora pass
 
 - **The volumetric pass was fogging the inside of the boat.** In-scatter is
@@ -312,10 +360,40 @@ this needs checking on the user's machine, where the last honest reading was
 200 fps at a much lower triangle count.** If it is short, the flora radii in
 `main.js` are the dial: they are set to 88 m against a lamp that reaches twelve.
 
+**She is now a vessel.** `src/vessel.js` is the boat as a body: throttle, rudder,
+ballast, drag split into surge/sway/heave, bottom contact against the slope
+normal. Three decisions carry the feel and all three are cheap —
+
+- **vertical is ballast, not thrust.** Eight-second tank lag, so every depth
+  command is committed long before it answers
+- **a rudder does nothing at rest.** Steering authority scales with the water
+  going past the blade
+- **the throttle is a setting, not a key you hold.** Walk aft with way on and she
+  is still going
+
+Walking now happens in *hull* coordinates with the camera composed through the
+vessel's matrix, which is what lets the deck move and turn under the player. The
+old arrangement nailed the boat down specifically so that collision could stay
+matrix-free; that trade is now paid off rather than avoided.
+
+Measured at 60 Hz in node: terminal way 4.5 m/s reached in about 25 s, a 24 s
+turning circle at full rudder, 1.8 m/s vertical when hard blown so the 400 m
+from the floor to the shelf takes roughly four minutes.
+
+**Helm controls:** W/S telegraph, A/D wheel, Space/C blow/flood, Shift for a
+faster telegraph, X all stop, E to stand up.
+
 **The user's standing complaints, in their order of importance:**
 
-1. Piloting the boat from the helm seat. The seat currently only changes the
-   viewpoint; the vehicle does not move.
+1. **Unexplained: a player screenshot of the canyon floor came back as a bright
+   teal lagoon with sunlight caustics on the seabed — mean sRGB 24,159,176 where
+   the same place measures 19,28,35 here.** Red matched and green was forty times
+   brighter, which is the spectral signature of *daylight through tens of metres*,
+   not of an exposure that opened too far. Not reproducible from this build at
+   any depth, in any mode, at either quality setting; a depth sweep of the whole
+   water column never produces it with flora in frame. The caustics half is now
+   explained and fixed. The brightness half needs the Depth readout from that
+   session before anyone theorises further.
 2. Sound. Hull creak under pressure would do more for tension than ten more panel
    details.
 3. Creatures. Deliberately deferred: procedural organics are the hardest part.

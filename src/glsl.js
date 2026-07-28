@@ -125,10 +125,27 @@ uniform float uSurfaceY;   // world Y of the sea surface
 uniform float uScatterGain;
 uniform vec3  uAmbientFloor; // bio/thermal glow that survives with no sun
 
-// Daylight remaining at a given world height.
-vec3 ambientAt(float worldY){
+/* Sunlight remaining at a given world height, and nothing else.
+ *
+ * Split out from ambientAt because the two are used for different jobs and
+ * conflating them broke a documented promise. Caustics and downwelling shafts
+ * are made *by the sun* — the terrain shader's own comment says they should be
+ * "simply absent on the canyon floor, because that is what happens to the beam
+ * that makes them". They were not absent: ambientAt adds the bio floor, which
+ * never decays, so the caustic web kept riding on it at four hundred metres
+ * where there has not been a photon of sunlight for a hundred and fifty. A
+ * canyon floor with a sunlight caustic on it discredits the whole optical
+ * model in one glance. */
+vec3 sunAt(float worldY){
   float d = max(0.0, uSurfaceY - worldY);
-  return uSurfaceIrr * exp(-uKd * d) + uAmbientFloor;
+  return uSurfaceIrr * exp(-uKd * d);
+}
+
+// Everything there is to see by: sunlight, plus the bio and thermal glow that
+// survives when the sun does not. Use this for shading; use sunAt for anything
+// that is specifically an effect of the beam.
+vec3 ambientAt(float worldY){
+  return sunAt(worldY) + uAmbientFloor;
 }
 
 // Colour of infinitely deep water in this direction — the fog colour.

@@ -775,13 +775,23 @@ export function sternMachinery(F) {
     ], 0.062);
     // A gauge board over the manifold: three faces the shader already knows.
     W.box(x - S * 0.02, DECK_Y + 1.28, z, 0.055, 0.30, 0.86, 0, I.LOCK, 0.5);
+    /* Three dials that read three different things.
+     *
+     * They were all wired to the same pressure value, so the machinery space
+     * had three identical needles standing at an identical angle — which is
+     * worse than one dial, because it tells the player the instruments are
+     * decoration. The wear slot is unused on a gauge face, so it carries the
+     * dial's type instead: 0 pressure, 4 trim, 2 ballast, in eighths. */
+    const GTYPE = [0 / 8, 4 / 8, 2 / 8];
     for (let i = 0; i < 3; i++) {
       const gz = z - 0.28 + i * 0.28;
       quad(W,
         [x - S * 0.050, DECK_Y + 1.16, gz - 0.11], [x - S * 0.050, DECK_Y + 1.16, gz + 0.11],
         [x - S * 0.050, DECK_Y + 1.38, gz + 0.11], [x - S * 0.050, DECK_Y + 1.38, gz - 0.11],
-        I.GAUGE, 0.2, [[0, 0], [1, 0], [1, 1], [0, 1]]);
-      ring(W, x - S * 0.048, DECK_Y + 1.27, gz, 0.115, 0.012, 14, 'x', I.BRASS, 0.4);
+        I.GAUGE, GTYPE[i], [[0, 0], [1, 0], [1, 1], [0, 1]]);
+      // Bezel in two parts, so the glass sits *in* the board rather than on it.
+      ring(W, x - S * 0.048, DECK_Y + 1.27, gz, 0.118, 0.014, 16, 'x', I.BRASS, 0.4);
+      ring(W, x - S * 0.028, DECK_Y + 1.27, gz, 0.128, 0.020, 16, 'x', I.TRIM, 0.5);
     }
   }
 
@@ -1052,13 +1062,16 @@ export function bowHelm(F) {
    * An instrument whose meaning is not given is better than one that is. The
    * needle moving for a reason you cannot name is the entire mechanism of
    * Iron Lung, and it costs a label you simply do not write. */
-  for (const gx of [-0.62, -0.30, 0.02]) {
+  // Depth, way and heading — the three numbers a pilot actually steers by.
+  const HTYPE = [1 / 8, 5 / 8, 3 / 8];
+  [-0.62, -0.30, 0.02].forEach((gx, i) => {
     quad(W,
       [gx - 0.115, TOP + 0.085, CZ - 0.115], [gx + 0.115, TOP + 0.085, CZ - 0.115],
       [gx + 0.115, TOP + 0.085, CZ + 0.115], [gx - 0.115, TOP + 0.085, CZ + 0.115],
-      I.GAUGE, 0.2, [[0, 0], [1, 0], [1, 1], [0, 1]]);
-    ring(W, gx, TOP + 0.082, CZ, 0.122, 0.013, 16, 'y', I.BRASS, 0.4);
-  }
+      I.GAUGE, HTYPE[i], [[0, 0], [1, 0], [1, 1], [0, 1]]);
+    ring(W, gx, TOP + 0.082, CZ, 0.125, 0.014, 16, 'y', I.BRASS, 0.4);
+    ring(W, gx, TOP + 0.062, CZ, 0.136, 0.022, 16, 'y', I.TRIM, 0.5);
+  });
 
   /* Sonar: a screen laid into the console at the angle a seated pilot reads.
    *

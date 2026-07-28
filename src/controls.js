@@ -55,6 +55,15 @@ export class Pilot {
      * you face and leaves the head free to look elsewhere. Sharing one movement
      * path would mean glancing at the deckhead sends you into it. */
     this.walk = false;
+    /* The frame the pilot is standing in, or null when swimming free.
+     *
+     * When it is set, `pos` and `yaw` are in the *hull's* coordinates, not the
+     * world's, and `apply()` composes them with the frame to place the camera.
+     * That inversion is what lets the boat move and turn underneath a walking
+     * player — the alternative, keeping the pilot in world space and correcting
+     * for the vessel every frame, has to solve the same problem backwards and
+     * gets it wrong the moment the frame rotates between two updates. */
+    this.frame = null;
     this.walkOrigin = new THREE.Vector3();
     this.walkBounds = null;      // (localZ, localY) -> half-width in metres
     this.deckY = 0;              // local Y of the deck
@@ -140,13 +149,32 @@ export class Pilot {
 
   /** Push pilot state onto the camera. */
   apply() {
-    this.camera.position.copy(this.pos);
+    const f = this.frame;
+    /* Heading composes with a minus, and the sign is derived rather than tried.
+     *
+     * The vessel's rotation maps hull +Z to (sin v, 0, cos v); the camera's
+     * heading convention has yaw y looking along (sin y, 0, -cos y). Pushing a
+     * local direction through the first and reading it back through the second
+     * gives world yaw = local yaw - vessel yaw. The two conventions have
+     * opposite handedness, which is exactly the kind of thing that produces a
+     * boat whose view spins the wrong way and a week of blaming the mouse. */
+    const wy = f ? this.yaw - f.yaw : this.yaw;
+    if (f) {
+      const c = Math.cos(f.yaw), s = Math.sin(f.yaw);
+      this.camera.position.set(
+        f.pos.x + this.pos.x * c + this.pos.z * s,
+        f.pos.y + this.pos.y,
+        f.pos.z - this.pos.x * s + this.pos.z * c,
+      );
+    } else {
+      this.camera.position.copy(this.pos);
+    }
     const dir = new THREE.Vector3(
-      Math.sin(this.yaw) * Math.cos(this.pitch),
+      Math.sin(wy) * Math.cos(this.pitch),
       Math.sin(this.pitch),
-      -Math.cos(this.yaw) * Math.cos(this.pitch),
+      -Math.cos(wy) * Math.cos(this.pitch),
     );
-    this.camera.lookAt(this.pos.clone().add(dir));
+    this.camera.lookAt(this.camera.position.clone().add(dir));
   }
 
   update(dt) {
@@ -224,8 +252,11 @@ export class Pilot {
    */
   _walk(dt) {
     const k = this.keys;
-    // Local frame: hull Z is forward, so local = world - origin.
-    const p = this.pos.clone().sub(this.walkOrigin);
+    /* `pos` already IS hull-local while walking, so there is no frame change
+     * here at all any more. It used to subtract a world origin, which only
+     * worked because the boat could not rotate; the whole reason the vehicle
+     * was nailed down was to keep this one line simple. */
+    const p = this.pos;
 
     const fwd = new THREE.Vector3(Math.sin(this.yaw), 0, -Math.cos(this.yaw));
     /* Derived by cross product, exactly as the swim path does it.
@@ -303,7 +334,6 @@ export class Pilot {
       }
     }
 
-    this.pos.copy(p).add(this.walkOrigin);
     this.vel.set(wish.x * spd, this.vy, wish.z * spd);
     this.apply();
   }

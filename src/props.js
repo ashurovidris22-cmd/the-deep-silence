@@ -389,7 +389,7 @@ export function buildRocks(count = 440, radius = 72, clear = [], seed = SEEDS.ro
         lit += alb * daylight * (0.26 + 0.62*up);
         // Same caustic field as the seabed, so the web runs continuously over a
         // boulder instead of stopping at its outline.
-        lit += alb * daylight * caustic(vW.xz, uTime) * smoothstep(0.2, 0.8, vN.y) * 2.0;
+        lit += alb * sunAt(vW.y) * caustic(vW.xz, uTime) * smoothstep(0.2, 0.8, vN.y) * 2.0;
 
         gl_FragColor = vec4(applyWater(lit, vW), 1.0);
       }`,

@@ -254,7 +254,12 @@ export class Post {
              * one even sheet — the modulation was still being computed and then
              * thrown away by the ceiling. A term meant to give structure must sit
              * well below the limit, not against it. */
-            vec3 down = ambientAt(p.y);
+            /* sunAt, not ambientAt — same bug as the caustics.
+             * The comment above already says these shafts are "simply gone
+             * below the photic zone". With the bio floor folded in they were
+             * not: the volume kept integrating a downwelling beam in water the
+             * sun stopped reaching a hundred and fifty metres higher up. */
+            vec3 down = sunAt(p.y);
             float m = shaftMask(p.xz, uTime);
             acc += down * m * phaseHG(dir.y, 0.45) * Tv * uScat * dt * 1.15;
 

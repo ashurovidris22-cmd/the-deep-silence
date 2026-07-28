@@ -9,6 +9,7 @@ import { buildSub } from './sub.js';
 import { buildInterior, interiorSolids, hullHalfWidth, DECK_Y, EYE, HULL_LEN, HELM } from './interior.js';
 import { Post } from './post.js';
 import { Pilot } from './controls.js';
+import { Vessel } from './vessel.js';
 import { FS_VERT, WATER } from './glsl.js';
 
 const qs = new URLSearchParams(location.search);
@@ -246,22 +247,28 @@ pilot.toggleLamp = () => { game.lampOn = game.lampOn > 0.5 ? 0 : 1; syncWater();
 function enterWalk() {
   game.mode = 'walk';
   pilot.walk = true;
-  pilot.walkOrigin.copy(boat.origin);
+  /* Hand the pilot the hull's frame. From here `pilot.pos` is in hull metres,
+   * which is what lets the deck move under the player's feet. */
+  pilot.frame = vessel;
   pilot.walkBounds = hullHalfWidth;
   pilot.deckY = DECK_Y;
   pilot.eyeH = EYE;
   pilot.halfLen = HULL_LEN - 1.1;
   pilot.solids = interiorSolids();
   pilot.vy = 0;
-  pilot.pos.copy(boat.origin).add(new THREE.Vector3(0, DECK_Y + EYE, 0.5));
+  pilot.pos.set(0, DECK_Y + EYE, 0.5);
   pilot.pitch = 0;
   pilot.apply();
 }
 function enterHelm() {
   game.mode = 'helm';
   pilot.walk = false;
-  pilot.enabled = false;   // seated: look only, the boat holds you
-  pilot.pos.copy(boat.origin).add(new THREE.Vector3(0, HELM.y, HELM.z - 0.35));
+  /* Seated, and the difference from before is that the controls are live.
+   * Look is free; W/S/A/D and Space/C now reach the vessel rather than the
+   * player, which is the whole point of a seat. */
+  pilot.enabled = false;
+  pilot.frame = vessel;
+  pilot.pos.set(0, HELM.y, HELM.z - 0.35);
 /* Facing the bow, which is 180 degrees, not zero.
    *
    * This heading has dir.z = -cos(yaw), so yaw 0 looks down -Z — toward the stern.
@@ -280,20 +287,26 @@ function enterHelm() {
  * both harder to trigger by accident and tells you where you came from. */
 const HATCH = new THREE.Vector3(0, 0, -1.5);
 function nearHatch() {
-  const p = pilot.pos.clone().sub(boat.origin);
+  const p = pilot.pos;   // already hull-local while walking
   return Math.abs(p.x - HATCH.x) < 1.0 && Math.abs(p.z - HATCH.z) < 1.1;
 }
 function enterSwim() {
   game.mode = 'swim';
   pilot.walk = false;
   pilot.enabled = true;
-  pilot.pos.copy(boat.origin).add(new THREE.Vector3(0, 3.4, -1.5));
+  /* Leaving the frame means converting out of it, both position and heading.
+   * Dropping either one teleports the swimmer to wherever the hull happened to
+   * be pointing at the origin, which looks exactly like a physics explosion. */
+  vessel.toWorld(new THREE.Vector3(0, 3.4, -1.5), pilot.pos);
+  pilot.yaw -= vessel.yaw;
+  pilot.frame = null;
   pilot.vel.set(0, 0, 0);
   pilot.pitch = -0.15;
   pilot.apply();
 }
 pilot.toggleMode = () => {
-  if (game.mode === 'swim') { enterWalk(); return; }
+  // Coming back aboard: the heading has to go back into the hull's frame too.
+  if (game.mode === 'swim') { pilot.yaw += vessel.yaw; enterWalk(); return; }
   // Only from under the hatch. Anywhere else, say so rather than doing nothing.
   if (game.mode === 'walk' && nearHatch()) enterSwim();
 };
@@ -301,7 +314,7 @@ pilot.interact = () => {
   if (game.mode === 'helm') { enterWalk(); pilot.enabled = true; return; }
   if (game.mode !== 'walk') return;
   // Only from the seat: an interaction that works from anywhere is a menu.
-  const p = pilot.pos.clone().sub(boat.origin);
+  const p = pilot.pos;   // hull-local while walking
   if (p.z > HELM.z - 2.4 && Math.abs(p.x) < 1.1) enterHelm();
 };
 /* Volumetric cost is steps x resolution and nothing else, so it is the one
@@ -408,7 +421,15 @@ const TURF_CLEAR = CAM_SPOTS.map((c) => ({ ...c, r: c.r * 0.30 }));
  * shelf, rim and descent stations; the density inside it goes up sevenfold for
  * fewer triangles than before. */
 const turf = buildTurf(TURF_CLEAR, { x: 403, z: 12 }, 58, 3600);
-const pens = buildPens(FLORA_CLEAR, { x: 20, z: 8 }, 88, 8600);
+/* Halved after the pens were rebuilt.
+ *
+ * A proper feather — eighteen curved pinnule pairs instead of eleven straight
+ * bars — costs 154 triangles against 54, so keeping the old count would have
+ * put nearly a million triangles into sea pens alone. The patchiness carries
+ * it: the same plants concentrated into fewer, denser beds read as a fuller
+ * garden than twice as many spread evenly, which is the same lesson as the
+ * first round and the opposite dial. */
+const pens = buildPens(FLORA_CLEAR, { x: 20, z: 8 }, 88, 4200);
 const sponges = buildSponges(FLORA_CLEAR, { x: 20, z: 8 }, 88, 1900);
 const whips = buildWhips(FLORA_CLEAR, { x: 20, z: 8 }, 88, 3000);
 
@@ -444,6 +465,12 @@ scene.add(sub.mesh);
  * coordinates. */
 const boat = buildInterior();
 scene.add(boat.mesh);
+
+/* The boat, as a body rather than as scenery.
+ *
+ * `boat.origin` is now only where she was launched. Everything that asks where
+ * she *is* asks the vessel, because the answer changes. */
+const vessel = new Vessel(boat.origin.clone(), 0);
 
 const beaconSpecs = [
   { pos: [ 34, -390, -12], col: [220, 300, 330], size: 0.55 },
@@ -595,6 +622,28 @@ const D2R = Math.PI / 180;
 function applyPose(name) {
   const p = POSES[name] || POSES.shelf;
   curPose = name;
+  /* A pose is a free camera, so it has to leave the hull's frame first.
+   *
+   * Missed on the first pass and it showed up as a number rather than a
+   * picture: every external review frame reported a depth of 808 m instead of
+   * 424. The pilot was still carrying the vessel as its frame, so the pose's
+   * world coordinates were being treated as hull-local and added to the boat's
+   * position — putting the camera twice as deep as the canyon goes. The frame
+   * looked plausible because the terrain is procedural and looks like itself
+   * everywhere; only the readout caught it. */
+  pilot.frame = null;
+  pilot.walk = false;
+  /* And frozen, because a review camera is not a swimmer.
+   *
+   * Left enabled, the pose fell straight through the free-swim path on the very
+   * next frame — including its clamp that keeps a swimmer inside a 280 m disc.
+   * The shelf stations are at x = 366 to 442, so every shelf frame was quietly
+   * dragged back to the canyon wall and came out as empty water. Two review
+   * rounds of shelf frames are worthless because of it. A pose sets the camera
+   * and nothing else is allowed to touch it — which is the same "one owner of
+   * the camera transform" rule that this file already states, applied to the
+   * one case that was exempt from it. */
+  pilot.enabled = false;
   const y = seabedHeight(p.x, p.z) + p.h;
   // The pilot owns position and orientation; the camera is downstream of it.
   // Two owners of the camera transform is how you get a review harness whose
@@ -649,10 +698,19 @@ function setDepthBand(metres) {
  */
 function adaptExposure(dt, snap = false) {
   const d = game.depth;
+  /* Sunlight AND the bio floor, because the renderer adds both.
+   *
+   * The meter modelled only the daylight term. Below the photic zone that term
+   * is exactly zero and the floor is a hundred per cent of the light in the
+   * frame — so at four hundred metres the meter believed it was exposing pure
+   * darkness while the renderer was handing it a lit scene. A meter and a
+   * renderer that disagree about how much light exists is the definition of a
+   * badly exposed picture, and no amount of tuning the cap fixes it because the
+   * two curves have different shapes. */
   const amb = [
-    env.surfaceIrr.x * Math.exp(-env.kd.x * d),
-    env.surfaceIrr.y * Math.exp(-env.kd.y * d),
-    env.surfaceIrr.z * Math.exp(-env.kd.z * d),
+    env.surfaceIrr.x * Math.exp(-env.kd.x * d) + env.ambientFloor.x,
+    env.surfaceIrr.y * Math.exp(-env.kd.y * d) + env.ambientFloor.y,
+    env.surfaceIrr.z * Math.exp(-env.kd.z * d) + env.ambientFloor.z,
   ];
   // Most of the frame is in-scattered water, so that is what sets the level.
   const fog = [
@@ -669,11 +727,29 @@ function adaptExposure(dt, snap = false) {
    * peak instead, this closed down until the deep scenes were unreadable; set
    * near zero it opened up until the pool clipped. */
   lum += game.lampOn * 0.075;
-  lum += 0.0016;                // bio floor, so the deep does not divide by zero
+  /* Pinned at the ceiling below about 150 m, and that is correct rather than a
+   * failure. Past the photic zone the only light is a constant bio floor, so
+   * the right exposure is constant too — the meter is saturating because the
+   * world has stopped changing, not because the range ran out. */
   const want = Math.min(6.0, Math.max(0.08, 0.135 / lum));
-  // Exact exponential approach: frame-rate independent, and stable on a long frame.
+
+  /* Asymmetric, the way an eye actually is.
+   *
+   * One time constant for both directions was measured doing real damage: rise
+   * from the canyon floor and the frame goes to 250,252,252 — total whiteout —
+   * because the exposure is still wide open from four hundred metres while the
+   * water around it has become daylight. The project's own notes record "I
+   * nearly went blind while ascending" as the reason adaptation was added in
+   * the first place; it was added and then given the wrong dynamics.
+   *
+   * Light adaptation in a real eye is fast — pupil plus photopigment bleaching,
+   * most of it inside half a second. Dark adaptation takes minutes. Modelling
+   * that asymmetry means an ascent never blinds you and a descent still has the
+   * long, uncomfortable swim into a darkness your eyes have not caught up with,
+   * which is the half worth keeping. */
+  const tau = want < post.exposure ? 0.30 : 3.0;
   post.exposure = snap ? want
-    : post.exposure + (want - post.exposure) * (1 - Math.exp(-dt / 1.5));
+    : post.exposure + (want - post.exposure) * (1 - Math.exp(-dt / tau));
 }
 
 function syncWater() {
@@ -734,7 +810,8 @@ const game = {
   // Exposed so the review harness can photograph the interior, which no camera
   // pose can reach — being inside the boat is a mode, not a viewpoint.
   walk: () => enterWalk(), helm: () => enterHelm(), swim: () => enterSwim(),
-  boatOrigin: () => boat.origin.clone(),
+  boatOrigin: () => vessel.pos.clone(),
+  vessel: () => vessel,
   pose: (n) => { applyPose(n); },
   /* Put the camera at a named station inside the boat.
    *
@@ -746,7 +823,7 @@ const game = {
   inside: (n) => {
     const p = INSIDE[n] || INSIDE.mess;
     enterWalk();
-    pilot.pos.copy(boat.origin).add(new THREE.Vector3(p.x, DECK_Y + EYE, p.z));
+    pilot.pos.set(p.x, DECK_Y + EYE, p.z);
     pilot.setFrom(pilot.pos.clone(), p.yaw, p.pitch);
     syncWater();
     adaptExposure(0, true);
@@ -799,6 +876,25 @@ const game = {
   // Sample the rendered frame's colour at a set of distances. The harness uses
   // this to check the absorption curve against Jerlov numerically instead of
   // arguing about whether the water "looks right".
+  /* Numbers the harness can compare, instead of arguing about a screenshot.
+   *
+   * Added after a player screenshot of the canyon floor came back as a bright
+   * teal lagoon while the review frame of the same place read 19,28,35 out of
+   * 255. Two images of one location that disagree by a factor of forty are not
+   * a matter of opinion, and the only way to find out which knob did it is to
+   * print the knobs. */
+  meters: () => ({
+    depth: game.depth, mode: game.mode, lamp: game.lampOn,
+    exposure: post.exposure, band: pilot.band,
+    camY: camera.position.y, surfaceY: env.surfaceY,
+    vsteps: post.matVol.uniforms.uSteps.value, vscale: post.volScale,
+    ambientFloor: env.ambientFloor.toArray(),
+    sunAtCam: [
+      env.surfaceIrr.x * Math.exp(-env.kd.x * game.depth),
+      env.surfaceIrr.y * Math.exp(-env.kd.y * game.depth),
+      env.surfaceIrr.z * Math.exp(-env.kd.z * game.depth),
+    ],
+  }),
   probeExtinction: () => ({
     extinction: env.ext.toArray(),
     kd: env.kd.toArray(),
@@ -826,6 +922,30 @@ function frame() {
   // before the water is evaluated or the fog lags the view by a frame.
   // Keep the vehicle in its water. MIN_DEPTH metres of cover, always.
   pilot.ceilingY = env.surfaceY - MIN_DEPTH;
+
+  /* Helm inputs, and the throttle is a setting rather than a key you hold.
+   *
+   * A telegraph stays where it is put. That is what makes leaving the seat with
+   * way on a decision instead of an accident: walk aft to look at the pumps and
+   * the boat is still making three knots toward whatever is in front of it.
+   * The rudder springs amidships on its own, because a wheel left hard over
+   * while the pilot is in another compartment turns the boat into a spiral the
+   * player has no way to diagnose. */
+  if (game.mode === 'helm') {
+    const k = pilot.keys;
+    const nudge = (k.has('ShiftLeft') ? 1.4 : 0.55) * dt;
+    if (k.has('KeyW')) vessel.throttle = Math.min(1, vessel.throttle + nudge);
+    if (k.has('KeyS')) vessel.throttle = Math.max(-0.6, vessel.throttle - nudge);
+    if (k.has('KeyX')) vessel.throttle = 0;
+    if (k.has('KeyA')) vessel.rudder = Math.max(-1, vessel.rudder - dt * 3.4);
+    if (k.has('KeyD')) vessel.rudder = Math.min(1, vessel.rudder + dt * 3.4);
+    // Blow to rise, flood to sink. The tank answers in its own time.
+    if (k.has('Space')) vessel.ballastCmd = Math.max(0, vessel.ballastCmd - dt * 0.42);
+    if (k.has('KeyC') || k.has('ControlLeft')) vessel.ballastCmd = Math.min(1, vessel.ballastCmd + dt * 0.42);
+  }
+  vessel.update(dt, env.surfaceY - MIN_DEPTH);
+  vessel.applyTo(boat.mesh);
+
   pilot.update(dt);
   // Absolute surface plus an optional offset. Depth is then purely a function
   // of where the camera is, which is what makes swimming down mean something.
@@ -877,8 +997,16 @@ function frame() {
   // rather than a scripted beat.
   iu.uAlarm.value = Math.min(1, Math.max(0, (game.depth - 260) / 340));
   iu.uLamps.value = 1.0;
+  /* The instruments read the vessel, so they cannot agree with each other by
+   * accident. Trim is the rate of change of depth, which is the number a real
+   * pilot watches when the ballast has been commanded and has not answered. */
+  iu.uDepth.value = game.depth;
+  iu.uWay.value = vessel.way;
+  iu.uHeading.value = vessel.heading;
+  iu.uBallast.value = vessel.ballast;
+  iu.uTrim.value = vessel.vel.y;
   // The interior shades in hull-local space, so it needs the eye there too.
-  iu.uEye.value.copy(camera.position).sub(boat.origin);
+  vessel.toLocal(camera.position, iu.uEye.value);
 
   renderer.info.reset();
   post.render(scene, camera, env);
@@ -896,11 +1024,11 @@ function frame() {
   let pmsg = null;
   if (game.mode === 'helm') pmsg = 'Stand up';
   else if (game.mode === 'walk') {
-    const lp = pilot.pos.clone().sub(boat.origin);
+    const lp = pilot.pos;   // hull-local while walking
     if (lp.z > HELM.z - 2.4 && Math.abs(lp.x) < 1.1) pmsg = 'Take the helm';
     else if (nearHatch()) pmsg = 'V — go outside through the hatch';
   } else if (game.mode === 'swim') {
-    const d = pilot.pos.distanceTo(boat.origin);
+    const d = pilot.pos.distanceTo(vessel.pos);
     if (d < 9) pmsg = 'V — back inside';
   }
   if (pmsg && !game.uiOff) { ptext.textContent = pmsg; prompt.hidden = false; } else prompt.hidden = true;
@@ -908,7 +1036,9 @@ function frame() {
   const legend = document.getElementById('legend');
   if (!legend.hidden) {
     const rows = game.mode === 'helm'
-      ? [['Mouse', 'look'], ['E', 'stand up'], ['L', 'lamp']]
+      ? [['W / S', 'ahead / astern'], ['A / D', 'port / starboard'],
+         ['Space / C', 'blow / flood ballast'], ['Shift', 'faster on the telegraph'],
+         ['X', 'all stop'], ['E', 'stand up'], ['L', 'lamp']]
       : game.mode === 'walk'
         ? [['W A S D', 'walk'], ['Mouse', 'look'], ['Space', 'step up'],
            ['E', 'use'], ['V', 'exit at hatch'], ['L', 'lamp']]
