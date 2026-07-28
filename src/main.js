@@ -4,6 +4,7 @@ import { buildTerrain, seabedHeight, isPhotic, SEA_LEVEL, CANYON_HALF, RIM } fro
 import { buildKelp, buildRocks } from './props.js';
 import { buildSnow } from './snow.js';
 import { buildStation } from './structures.js';
+import { buildSub } from './sub.js';
 import { Post } from './post.js';
 import { Pilot } from './controls.js';
 import { FS_VERT, WATER } from './glsl.js';
@@ -259,6 +260,8 @@ const CAM_SPOTS = [
   // Keep boulders out of the installation footprint and off the walkway.
   { x: 30, z: -18, r: 15 }, { x: 19, z: 18, r: 6 }, { x: 54, z: 4, r: 5 },
   { x: 14, z: 40, r: 6 },
+  // Clear of the wreck and its two camera stations.
+  { x: -36, z: 46, r: 13 }, { x: -31, z: 50.2, r: 4 }, { x: -27, z: 44, r: 4 },
 ];
 
 const terrain = buildTerrain();
@@ -290,6 +293,10 @@ scene.add(terrain, kelp, rocks, snow);
 const station = buildStation();
 scene.add(station.mesh);
 
+/* The wreck. Lofted, unlike the station, and placed where the walkway leads. */
+const sub = buildSub();
+scene.add(sub.mesh);
+
 const beaconSpecs = [
   { pos: [ 34, -390, -12], col: [220, 300, 330], size: 0.55 },
   { pos: [ 38, -392, -15], col: [150, 200, 225], size: 0.34 },
@@ -306,7 +313,7 @@ env.points = [
   { pos: new THREE.Vector3(-18, -393, -26), col: new THREE.Vector3(1.8, 8.5, 3.6) },
 ];
 
-for (const o of [terrain, kelp, rocks, snow, backdrop, station.mesh]) env.register(o.material);
+for (const o of [terrain, kelp, rocks, snow, backdrop, station.mesh, sub.mesh]) env.register(o.material);
 env.register(beacons.userData.mat);
 
 /* -------------------------------------------------------------------- poses
@@ -345,6 +352,19 @@ const POSES = {
    * its job — straight lines give the eye a scale and a sharpness reference that
    * noise-derived rock cannot. */
   catwalk: { x: 19, z: 18, h: 7.2, yaw: -159, pitch:  -5, lamp: 1.0 },
+  /* The wreck, from off the bow quarter. Heading solved from its position at
+   * (-36, 46): the loft has to be judged on its silhouette, so the camera sits
+   * where the section change from shouldered stern to round nose is side-on. */
+/* Side-on, and the heading is solved rather than chosen.
+   *
+   * The hull is yawed 2.35 rad, so its axis runs along (0.707, 0, -0.707). Viewing
+   * down that axis shows a circular section and nothing else — the exponent sweep
+   * from shouldered stern to round bow is only visible perpendicular to it. This
+   * camera sits on that perpendicular, nine metres out, which is also inside the
+   * lamp's useful range at this depth. Eighteen metres put the wreck in the dark. */
+  wreck:  { x: -31.0, z: 50.2, h: 1.5, yaw:  -45, pitch:  -2, lamp: 1.0 },
+  // Close on the viewport surround, where the plating and seams are readable.
+  bow:    { x: -27.0, z: 44.0, h: 1.8, yaw:  -80, pitch:  -4, lamp: 1.0 },
   // The platform from off to one side, so its silhouette reads against the dark.
   /* Yaw solved from the geometry, not guessed. The platform sits at (30,-18) and
    * this camera at (54,4), so the heading is atan2(dx, -dz) of that difference —
@@ -505,7 +525,7 @@ const game = {
   setWater: (a, b, t) => env.setWater(a, b, t),
   visibility: () => env.visibility,
   setLayer: (name, on) => {
-    const o = { kelp, rocks, snow, terrain, beacons, station: station.mesh }[name];
+    const o = { kelp, rocks, snow, terrain, beacons, station: station.mesh, sub: sub.mesh }[name];
     if (o) o.visible = on;
     if (name === 'hud') document.getElementById('hud').hidden = !on;
   },

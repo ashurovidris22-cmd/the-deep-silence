@@ -28,8 +28,11 @@ const M_STEEL = 0.0;   // painted plate, mostly gone to rust
 const M_GRATE = 1.0;   // walkway grating: darker, holes implied by texture
 const M_PIPE = 2.0;    // bare pipe, heavier scale
 const M_CONC = 3.0;    // concrete ballast blocks
+const M_HULL = 4.0;    // lofted pressure hull: plated, seamed, painted
+const M_GLASS = 5.0;   // viewport
+export const MAT = { STEEL: M_STEEL, GRATE: M_GRATE, PIPE: M_PIPE, CONC: M_CONC, HULL: M_HULL, GLASS: M_GLASS };
 
-class Welder {
+export class Welder {
   constructor() {
     this.pos = []; this.nrm = []; this.mat = []; this.wear = []; this.uv = []; this.idx = [];
     this.v = 0;
@@ -255,7 +258,7 @@ function debris(W, rand, cx, cz, spread, count) {
 
 /* ------------------------------------------------------------------- material */
 
-function structureMaterial() {
+export function structureMaterial() {
   return new THREE.ShaderMaterial({
     uniforms: {
       uExt: { value: new THREE.Vector3() },
@@ -348,6 +351,23 @@ function structureMaterial() {
         alb = mix(alb, vec3(0.062, 0.086, 0.054), film * 0.42);
         float barn = smoothstep(0.72, 0.95, pat2) * clamp(vN.y, 0.0, 1.0);
         alb = mix(alb, vec3(0.30, 0.295, 0.268), barn * 0.85 * mid);
+
+        /* Plate seams on the lofted hull.
+         *
+         * A loft gives one continuous surface, which is correct and also reads as
+         * a single moulded pod unless the plating is put back. The UVs carry arc
+         * position and length in metres, so a seam every bay in each direction
+         * lands where a welded strake actually would — and the dark line is a
+         * recess catching no light, not a painted stripe. */
+        if (vMat > 3.5 && vMat < 4.5) {
+          float seamU = abs(fract(vUV.x * 1.0) - 0.5) * 2.0;
+          float seamV = abs(fract(vUV.y * 0.62) - 0.5) * 2.0;
+          float seam = min(smoothstep(0.0, 0.14, seamU), smoothstep(0.0, 0.09, seamV));
+          alb *= 0.46 + 0.54 * seam;
+          // Weld beads sit slightly proud and catch the lamp along their length.
+          float bead = (1.0 - smoothstep(0.02, 0.12, seamV)) * 0.5;
+          alb += vec3(0.035) * bead * mid;
+        }
 
         // Grating reads darker and stripier than plate.
         if (isGrate) {
