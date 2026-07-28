@@ -31,7 +31,13 @@ class Env {
     this.surfaceIrr = new THREE.Vector3(23.0, 30.0, 34.0);
     // What is left when the sun is gone: faint bio-glow and thermal seep.
     // Never zero. Pure black reads as a broken renderer, not as darkness.
-    this.ambientFloor = new THREE.Vector3(0.0007, 0.0018, 0.0027);
+    /* Raised, and it is doing real work now.
+     * This is the light that has nothing to do with the sun: bioluminescence,
+     * thermal seep, the general faint glow of a living ocean. At a thousandth it
+     * only kept the maths from dividing by zero. At this level the deep still
+     * reads as dark, but shapes resolve just outside the lamp instead of the
+     * world ending at the edge of the beam. */
+    this.ambientFloor = new THREE.Vector3(0.0032, 0.0090, 0.0125);
     /* Single-scattering albedo already says how much light the medium returns,
      * but the ambient field feeding it is a crude hemispheric constant rather
      * than a real radiance distribution. Left at 1.0 the fog comes out several
@@ -55,7 +61,12 @@ class Env {
      * lens is nearly three times lower than the point-source version — which was
      * the entire purpose of adding r0. */
     this.lampInt = 900;
-    this.lampCos = Math.cos(0.56);
+    /* A wider cone, because a narrow one is not atmospheric, it is unusable.
+     * At 32 degrees the lit pool covered a fraction of the frame and everything
+     * around it was black — the player reasonably reported not being able to see.
+     * Real submersible floods are wide precisely because the water already
+     * limits how far you can see; there is no reason to limit the angle too. */
+    this.lampCos = Math.cos(0.74);
     this.lampSoft = 0.34;
 
     this.points = [];

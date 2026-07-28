@@ -159,11 +159,35 @@ export function buildTerrain(size = 1200, seg = 480) {
          * water permits) and ONE shared low-frequency lookup feeding albedo,
          * mottle and biofilm rather than three independent ones. */
         vec2 p = vW.xz;
-        float e = 0.4;
-        float h  = fbm(p*2.4, 2);
-        float hx = fbm((p+vec2(e,0.0))*2.4, 2);
-        float hz = fbm((p+vec2(0.0,e))*2.4, 2);
-        vec3 n = normalize(vN + vec3(-(hx-h)/e, 0.0, -(hz-h)/e) * 1.15);
+        float dist = length(cameraPosition - vW);
+
+        /* Multi-scale detail, faded by distance.
+         *
+         * The mesh has a vertex every two and a half metres, so every bit of
+         * texture the eye reads up close has to come from here. One octave band
+         * around half a metre — which is all this had — leaves smooth grey lobes
+         * with nothing to focus on: correct at ten metres, featureless at one.
+         *
+         * Three bands instead, at roughly 40 cm, 9 cm and 2 cm, each faded out
+         * with distance. The fade is not an optimisation, it is anti-aliasing:
+         * a 2 cm feature seen from twenty metres is far below a pixel and would
+         * alias into crawling static, so it must be gone before it gets there.
+         *
+         * Summed into one height field and sampled three times, rather than
+         * three fields sampled nine times. */
+        float fine = exp(-dist * 0.55);
+        float mid  = exp(-dist * 0.11);
+        float e = 0.055;
+        #define GRIT(q) ( fbm((q)*2.4, 2) \
+                        + mid  * 0.55 * fbm((q)*11.0, 2) \
+                        + fine * 0.30 * vnoise((q)*46.0) )
+        float h  = GRIT(p);
+        float hx = GRIT(p + vec2(e, 0.0));
+        float hz = GRIT(p + vec2(0.0, e));
+        // Bump strength rises as the detail fades in, so close ground reads as
+        // coarse sediment while distant ground stays smooth and unaliased.
+        float bump = 0.16 + 0.85 * mid;
+        vec3 n = normalize(vN + vec3(-(hx-h)/e, 0.0, -(hz-h)/e) * bump);
 
         float lo = fbm(p*0.32, 3);
         float flat_ = smoothstep(0.55, 0.96, n.y);
@@ -187,7 +211,23 @@ export function buildTerrain(size = 1200, seg = 480) {
 
         vec3 alb = mix(scree, silt, flat_ * (0.55 + 0.45*lo));
         alb = mix(alb, mix(rockB, rockA, strata), steep * 0.82);
-        alb *= 0.82 + 0.32 * h;
+        alb *= 0.82 + 0.26 * h;
+
+        /* Grit in the albedo as well as in the normal.
+         *
+         * Shading alone gives shape without material: the surface reads as one
+         * substance lit unevenly. Sediment is not one substance — it is pale
+         * shell hash and dark mineral grains mixed, and the tonal speckle is
+         * most of what identifies it. Both terms carry the same distance fade as
+         * the normals, for the same anti-aliasing reason. */
+        float pebble = smoothstep(0.74, 0.93, vnoise(p*6.5));
+        alb = mix(alb, alb * 1.85, pebble * 0.55 * mid * flat_);
+        float grit  = vnoise(p*52.0);
+        float grit2 = vnoise(p*17.0);
+        alb *= 1.0 + (grit - 0.5) * 0.42 * fine + (grit2 - 0.5) * 0.26 * mid;
+        // A few bright fragments. Sparse, so they read as objects not as noise.
+        float shell = smoothstep(0.955, 0.995, vnoise(p*23.0));
+        alb += vec3(0.10, 0.098, 0.088) * shell * fine * flat_;
 
         // Patchy biofilm on the flats only. A uniform green tint reads as a
         // colour grade; patches read as something living.

@@ -336,9 +336,9 @@ export class Post {
         uNear: { value: 0.1 }, uFar: { value: 900 },
         /* Focus a few metres out, which is where a submersible's lamp actually
          * puts anything worth looking at. */
-        uFocus: { value: 7.5 }, uDofAmount: { value: 1.0 },
+        uFocus: { value: 5.0 }, uDofAmount: { value: 0.85 },
         uExposure: { value: 1.0 }, uBloom: { value: 0.62 },
-        uGrain: { value: 0.011 }, uVignette: { value: 0.42 }, uCA: { value: 0.0016 },
+        uGrain: { value: 0.011 }, uVignette: { value: 0.28 }, uCA: { value: 0.0016 },
         uTime: { value: 0 }, uRes: { value: new THREE.Vector2() },
         uLift: { value: new THREE.Vector3(0.004, 0.008, 0.012) },
       },
@@ -391,8 +391,17 @@ export class Post {
            */
           float dRaw = texture2D(tDepth, uv).r;
           float zl = (2.0*uNear*uFar) / (uFar + uNear - (dRaw*2.0-1.0)*(uFar-uNear));
-          float nearCoc = smoothstep(uFocus*0.72, 0.28, zl);
-          float farCoc  = smoothstep(uFocus*2.4, uFocus*8.0, zl) * 0.42;
+          /* Near blur confined to the first metre and a half.
+           *
+           * Keyed off the focus distance this ramped from five metres inward, so
+           * roughly half of everything three metres away was already smeared —
+           * and since the lamp only reaches a few metres, that meant the only
+           * lit part of the frame was the blurred part. Reported, reasonably, as
+           * not being able to see anything. A real housing holds focus over most
+           * of its useful range and loses it only right against the port, which
+           * is also the only place the effect is worth having. */
+          float nearCoc = smoothstep(1.5, 0.3, zl);
+          float farCoc  = smoothstep(uFocus*3.0, uFocus*10.0, zl) * 0.30;
           float coc = clamp((nearCoc + farCoc) * uDofAmount, 0.0, 1.0);
           col = mix(col, texture2D(tDof, uv).rgb, coc);
 
