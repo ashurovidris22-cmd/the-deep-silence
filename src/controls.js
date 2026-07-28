@@ -36,8 +36,17 @@ export class Pilot {
     this.boost = 2.6;          // shift: survey transit speed
 
     this.sensitivity = 0.0021;
+    this.invertY = false;
     this.enabled = false;
     this.locked = false;
+
+    /* Lowest world Y the vehicle may reach, set each frame from the sea surface.
+     *
+     * Without it you can simply swim up out of the depth band: the daylight term
+     * is exp(-Kd * depth), so ascending thirty metres multiplies the ambient by
+     * about twenty and the frame goes white. That is not a tone-mapping problem,
+     * it is a submersible leaving the water. */
+    this.ceilingY = Infinity;
 
     // Depth band. Moving vertically inside the scene changes depth by metres;
     // this lets you change it by kilometres, which is the only way to see the
@@ -61,8 +70,19 @@ export class Pilot {
 
     document.addEventListener('mousemove', (e) => {
       if (!this.locked) return;
-      this.yaw -= e.movementX * this.sensitivity;
-      this.pitch -= e.movementY * this.sensitivity;
+      /* Yaw ADDS movementX, and the sign is not a matter of taste.
+       *
+       * This heading is built as dir.x = sin(yaw), dir.z = -cos(yaw), so yaw
+       * grows clockwise: positive yaw points +X, which is screen-right for a
+       * camera looking down -Z. Most implementations subtract here because they
+       * drive a YXZ Euler, where positive Y rotation turns the other way. Copying
+       * that convention onto this formula inverted the horizontal axis — mouse
+       * right, view left. Trust the basis you actually built, not the idiom.
+       */
+      this.yaw += e.movementX * this.sensitivity;
+      // Vertical is conventional: mouse down looks down. Offered as an option
+      // because this genuinely is preference, unlike the above.
+      this.pitch -= e.movementY * this.sensitivity * (this.invertY ? -1 : 1);
       // Just short of vertical. Reaching exactly +-90 degrees makes the yaw
       // axis degenerate and the view snaps as it passes through.
       const lim = 88 * D2R;
@@ -150,6 +170,11 @@ export class Pilot {
     if (this.pos.y < floor) {
       this.pos.y = floor;
       if (this.vel.y < 0) this.vel.y *= -0.12;   // slight settle, not a bounce
+    }
+    // And a ceiling: the vehicle stays under the water it is designed for.
+    if (this.pos.y > this.ceilingY) {
+      this.pos.y = this.ceilingY;
+      if (this.vel.y > 0) this.vel.y = 0;
     }
 
     // Keep inside the built terrain. Beyond it the heightfield still evaluates

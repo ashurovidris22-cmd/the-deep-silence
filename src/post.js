@@ -232,6 +232,28 @@ export class Post {
               acc += uLampCol * att * cone * ph * Tv * Tl * uScat * dt;
             }
 
+            /* --- downwelling shafts from the surface
+             *
+             * The same in-scatter integral, but with the sun as the source
+             * instead of the lamp. Light propagates downward, so the phase angle
+             * against a view ray is just dir.y: look up and you are staring
+             * along the direction the photons are already travelling, which is
+             * where a forward-scattering medium sends most of them. That single
+             * term is why the water above reads as columns rather than a wash,
+             * and why turning to look up is worth doing.
+             *
+             * Modulated by ambientAt(), so the shafts fade with the daylight
+             * that makes them and are simply gone below the photic zone. */
+            /* Weak, because the output is clamped and this term is the one most
+             * able to saturate it. At full strength in shallow water it exceeded
+             * the clamp across the whole frame, so every shaft flattened into
+             * one even sheet — the modulation was still being computed and then
+             * thrown away by the ceiling. A term meant to give structure must sit
+             * well below the limit, not against it. */
+            vec3 down = ambientAt(p.y);
+            float m = shaftMask(p.xz, uTime);
+            acc += down * m * phaseHG(dir.y, 0.45) * Tv * uScat * dt * 1.15;
+
             // --- omni sources (distant station lamps, bio clusters)
             for(int k=0;k<4;k++){
               if(k>=uPointCount) break;

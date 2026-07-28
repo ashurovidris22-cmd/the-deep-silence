@@ -210,7 +210,14 @@ const camera = new THREE.PerspectiveCamera(62, 1, 0.05, 900);
 
 const env = new Env();
 const post = new Post(renderer);
+/* Never less than this much water overhead. Six metres is enough that the
+ * daylight term stays bounded and the vehicle reads as submerged; it also means
+ * the exposure never has to cope with a breach it was not designed for. */
+const MIN_DEPTH = 6;
+
 const pilot = new Pilot(camera, canvas);
+pilot.invertY = qStr('invertY', '0') === '1';
+pilot.sensitivity = qNum('sens', 0.0021);
 pilot.toggleLamp = () => { game.lampOn = game.lampOn > 0.5 ? 0 : 1; syncWater(); };
 /* Volumetric cost is steps x resolution and nothing else, so it is the one
  * dial worth exposing. The review harness runs on a software rasteriser where
@@ -317,6 +324,9 @@ function applyPose(name) {
   game.lampOn = p.lamp;
   setDepthBand(p.depth);
   syncWater();
+  // Snap, do not ease. A review frame must not depend on how long the harness
+  // happened to wait for the adaptation to finish.
+  adaptExposure(0, true);
 }
 
 /* Depth is expressed by moving the sea surface, not the camera.
@@ -333,6 +343,47 @@ function applyPose(name) {
  * downward changed the view without changing the water. */
 function setDepthBand(metres) {
   env.surfaceY = camera.position.y + metres;
+}
+
+/* Eye adaptation, computed rather than measured.
+ *
+ * Between six metres of daylight and four kilometres of black there is something
+ * like four orders of magnitude of ambient light. A fixed exposure cannot serve
+ * both: tuned for depth it whites out on the way up — which is what "I nearly
+ * went blind while ascending" is — and tuned for the surface the deep is an
+ * unreadable black frame.
+ *
+ * No luminance histogram is needed, because the ambient field here is analytic:
+ * surfaceIrr * exp(-Kd * depth) is exactly what the water is doing, so the
+ * brightness of the frame can be predicted instead of sampled. That avoids a
+ * GPU-to-CPU readback and the pipeline stall it costs, and it cannot oscillate
+ * the way a feedback loop reading its own output can.
+ *
+ * The time constant is the point, though. Snapping exposure per-frame would keep
+ * the image legible and feel like a bug; a second and a half of lag reads as an
+ * eye, or an aperture, catching up — and it lets the frame genuinely dazzle for a
+ * moment when you rise into the light, which is the sensation worth having.
+ */
+function adaptExposure(dt, snap = false) {
+  const d = game.depth;
+  const amb = [
+    env.surfaceIrr.x * Math.exp(-env.kd.x * d),
+    env.surfaceIrr.y * Math.exp(-env.kd.y * d),
+    env.surfaceIrr.z * Math.exp(-env.kd.z * d),
+  ];
+  // Most of the frame is in-scattered water, so that is what sets the level.
+  const fog = [
+    amb[0] * env.albedo.x * env.scatterGain,
+    amb[1] * env.albedo.y * env.scatterGain,
+    amb[2] * env.albedo.z * env.scatterGain,
+  ];
+  let lum = 0.2126 * fog[0] + 0.7152 * fog[1] + 0.0722 * fog[2];
+  lum += game.lampOn * 0.055;   // the lamp pool is in shot whatever the depth
+  lum += 0.0016;                // bio floor, so the deep does not divide by zero
+  const want = Math.min(6.0, Math.max(0.08, 0.135 / lum));
+  // Exact exponential approach: frame-rate independent, and stable on a long frame.
+  post.exposure = snap ? want
+    : post.exposure + (want - post.exposure) * (1 - Math.exp(-dt / 1.5));
 }
 
 function syncWater() {
@@ -383,7 +434,7 @@ const game = {
   scene, camera, renderer, env, post,
   pilot,
   pose: (n) => { applyPose(n); },
-  setDepth: (m) => { setDepthBand(m); pilot.band = m; pilot.bandTarget = m; syncWater(); },
+  setDepth: (m) => { setDepthBand(m); pilot.band = m; pilot.bandTarget = m; syncWater(); adaptExposure(0, true); },
   setLamp: (v) => { game.lampOn = v; syncWater(); },
   setWater: (a, b, t) => env.setWater(a, b, t),
   visibility: () => env.visibility,
@@ -421,11 +472,14 @@ function frame() {
   // Pilot first: everything downstream reads the camera, so it has to be final
   // before the water is evaluated or the fog lags the view by a frame.
   const bandBefore = pilot.band;
+  // Keep the vehicle in its water. MIN_DEPTH metres of cover, always.
+  pilot.ceilingY = env.surfaceY - MIN_DEPTH;
   pilot.update(dt);
   // A change of band moves the surface with the vehicle, so the dive control
   // adds water overhead rather than teleporting the seabed.
   env.surfaceY += pilot.band - bandBefore;
   syncWater();
+  adaptExposure(dt);
 
   env.tick(game.time);
 

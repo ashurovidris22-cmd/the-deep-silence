@@ -156,8 +156,22 @@ export function buildTerrain(size = 620, seg = 340) {
         // Ambient from above, occluded by facing down. Kept at full strength:
         // the seabed is lit by the same field that lights the water, so any
         // factor below 1 makes the floor read as a hole in the fog.
-        vec3 amb = ambientAt(vW.y) * (0.30 + 0.70*clamp(n.y*0.5+0.5,0.0,1.0));
+        vec3 daylight = ambientAt(vW.y);
+        vec3 amb = daylight * (0.30 + 0.70*clamp(n.y*0.5+0.5,0.0,1.0));
         lit += alb * amb;
+
+        /* Caustics, driven by the daylight term itself.
+         *
+         * Multiplying by the daylight vector rather than by a hand-written depth
+         * fade means they need no rule of their own: bright in ten metres of
+         * water, faint at eighty, simply absent below the photic zone, because
+         * that is what happens to the beam that makes them. Upward faces only —
+         * a caustic on a vertical wall is a decal.
+         *
+         * (No backticks in here. This is inside a JS template literal, and one
+         * stray backtick terminates the shader mid-comment.) */
+        float caus = caustic(vW.xz, uTime) * smoothstep(0.15, 0.75, n.y);
+        lit += alb * daylight * caus * 2.4;
 
         gl_FragColor = vec4(applyWater(lit, vW), 1.0);
       }`,

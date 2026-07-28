@@ -57,6 +57,49 @@ float ridged(vec2 p, int oct){
 /* Interleaved gradient noise — the cheapest dither that does not band or
  * crawl. Used to offset raymarch start points so 32 steps look like 200. */
 float ign(vec2 px){ return fract(52.9829189*fract(dot(px,vec2(0.06711056,0.00583715)))); }
+
+/* Caustics.
+ *
+ * The bright web crawling over a sunlit seabed is the surface acting as a lens:
+ * wave curvature focuses sunlight into caustic sheets. Tracing that honestly
+ * means refracting through an animated surface, which is not worth it — but the
+ * *shape* is characteristic and cheap to imitate. Two low-frequency fields
+ * drifting against each other, and the ridge where they cross, raised to a
+ * power: that gives the thin interlocking filaments rather than blobs.
+ *
+ * Tied to the daylight term by the caller, so it dies with the sunlight instead
+ * of needing its own depth rule. Caustics require a direct beam; below a couple
+ * of hundred metres there is none, and they must simply not be there. */
+float caustic(vec2 p, float t){
+  /* The two fields must be genuinely decorrelated, and that is the whole trick.
+   *
+   * Sampled at the same frequency with only a small time offset they are very
+   * nearly the same field, so their difference is ~0 everywhere: 1 - |a-b|*k
+   * comes out near 1 across the entire seabed and the result is a uniform lift
+   * in brightness rather than a pattern. Large fixed spatial offsets make them
+   * independent, so |a-b| ranges widely and the thin ridge where a and b happen
+   * to cross becomes the caustic filament. */
+  float a = fbm(p*0.55 + vec2( 11.3,  4.7) + vec2(t*0.045, t*0.031), 2);
+  float b = fbm(p*0.55 + vec2(-37.2, 18.6) - vec2(t*0.037, t*0.052), 2);
+  float w = pow(max(1.0 - abs(a - b) * 3.4, 0.0), 4.0);
+  // A finer, faster pair so the strands have structure inside them.
+  float a2 = fbm(p*1.9 + vec2( 61.5, -23.1) + vec2(t*0.085, -t*0.062), 2);
+  float b2 = fbm(p*1.9 + vec2(-14.8,  52.4) - vec2(t*0.051, t*0.094), 2);
+  float w2 = pow(max(1.0 - abs(a2 - b2) * 3.9, 0.0), 5.0);
+  return w * 0.78 + w2 * 0.42;
+}
+
+/* Downwelling shafts, for use inside the ray march.
+ *
+ * Deliberately trigonometric rather than fbm-based: this is evaluated once per
+ * march step, so a version costing eight hash rounds would cost two hundred and
+ * fifty per pixel. Four sines buy the same broad interlocking columns at a
+ * fraction of that, and the volume is blurred afterwards anyway. */
+float shaftMask(vec2 p, float t){
+  float s1 = sin(p.x*1.15 + t*0.13) * sin(p.y*0.95 - t*0.11);
+  float s2 = sin(p.x*0.47 - t*0.07 + 1.7) * sin(p.y*0.58 + t*0.09);
+  return pow(max(0.0, 0.5 + 0.5*(s1*0.62 + s2*0.38)), 3.0);
+}
 `;
 
 /**

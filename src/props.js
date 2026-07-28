@@ -269,6 +269,7 @@ export function buildRocks(count = 440, radius = 72, clear = [], seed = SEEDS.ro
       ${WATER}
       varying vec3 vW; varying vec3 vN; varying float vTint;
       uniform vec3 uLampPos, uLampDir, uLampCol; uniform float uLampInt, uLampCos, uLampSoft;
+      uniform float uTime;
 
       void main(){
         vec2 q = vW.xz * 1.4 + vW.y * 0.7;
@@ -289,7 +290,11 @@ export function buildRocks(count = 440, radius = 72, clear = [], seed = SEEDS.ro
         float atten = uLampInt / (1.0 + dL*dL*0.85);
         float ndl = max(dot(vN, L), 0.0);
         vec3 lit = alb * uLampCol * ndl * atten * cone * lampTransmit(dL);
-        lit += alb * ambientAt(vW.y) * (0.26 + 0.62*up);
+        vec3 daylight = ambientAt(vW.y);
+        lit += alb * daylight * (0.26 + 0.62*up);
+        // Same caustic field as the seabed, so the web runs continuously over a
+        // boulder instead of stopping at its outline.
+        lit += alb * daylight * caustic(vW.xz, uTime) * smoothstep(0.2, 0.8, vN.y) * 2.0;
 
         gl_FragColor = vec4(applyWater(lit, vW), 1.0);
       }`,
