@@ -337,7 +337,7 @@ export class Post {
         /* Focus a few metres out, which is where a submersible's lamp actually
          * puts anything worth looking at. */
         uFocus: { value: 5.0 }, uDofAmount: { value: 0.85 },
-        uExposure: { value: 1.0 }, uBloom: { value: 0.62 },
+        uExposure: { value: 1.0 }, uExposureIn: { value: 1.05 }, uBloom: { value: 0.62 },
         uGrain: { value: 0.011 }, uVignette: { value: 0.28 }, uCA: { value: 0.0016 },
         uTime: { value: 0 }, uRes: { value: new THREE.Vector2() },
         uLift: { value: new THREE.Vector3(0.004, 0.008, 0.012) },
@@ -348,7 +348,7 @@ export class Post {
         ${NOISE}
         varying vec2 vUv;
         uniform sampler2D tScene, tVol, tBloom, tDof, tDepth;
-        uniform float uExposure, uBloom, uGrain, uVignette, uCA, uTime;
+        uniform float uExposure, uExposureIn, uBloom, uGrain, uVignette, uCA, uTime;
         uniform float uNear, uFar, uFocus, uDofAmount;
         uniform vec2 uRes; uniform vec3 uLift;
 
@@ -416,7 +416,18 @@ export class Post {
           col += texture2D(tVol, uv).rgb;
           col += texture2D(tBloom, uv).rgb * uBloom;
 
-          col *= uExposure;
+/* Two exposures, selected by the same alpha that exempts the cockpit from
+           * defocus.
+           *
+           * The auto-exposure is driven by the water, which spans four orders of
+           * magnitude between the shelf and the canyon floor. The interior is in
+           * air, lit by its own lamps, and has no business being metered against
+           * the ocean — held to the outside meter it is either a black hole at
+           * depth or a white box in the shallows, and no amount of tuning the
+           * cabin lights fixes it because the target keeps moving. Giving the
+           * inside a fixed stop is what a real camera through a porthole cannot
+           * do, and exactly what an eye adapting to a lit room does. */
+          col *= mix(uExposureIn, uExposure, notCabin);
           col = ACESFitted(col);
 
           // Lift the blacks slightly and cool them. Pure black in water is a

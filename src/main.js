@@ -5,7 +5,7 @@ import { buildKelp, buildRocks } from './props.js';
 import { buildSnow } from './snow.js';
 import { buildStation } from './structures.js';
 import { buildSub } from './sub.js';
-import { buildCabin } from './cabin.js';
+import { buildInterior, hullHalfWidth, DECK_Y, EYE, HULL_LEN, HELM } from './interior.js';
 import { Post } from './post.js';
 import { Pilot } from './controls.js';
 import { FS_VERT, WATER } from './glsl.js';
@@ -239,6 +239,50 @@ const pilot = new Pilot(camera, canvas);
 pilot.invertY = qStr('invertY', '0') === '1';
 pilot.sensitivity = qNum('sens', 0.0021);
 pilot.toggleLamp = () => { game.lampOn = game.lampOn > 0.5 ? 0 : 1; syncWater(); };
+
+/* Three modes, and they are genuinely different vehicles rather than one with
+ * flags: walking the boat, sitting at the helm, and swimming outside. */
+function enterWalk() {
+  game.mode = 'walk';
+  pilot.walk = true;
+  pilot.walkOrigin.copy(boat.origin);
+  pilot.walkBounds = hullHalfWidth;
+  pilot.deckY = DECK_Y;
+  pilot.eyeH = EYE;
+  pilot.halfLen = HULL_LEN - 0.5;
+  pilot.vy = 0;
+  pilot.pos.copy(boat.origin).add(new THREE.Vector3(0, DECK_Y + EYE, 0.5));
+  pilot.pitch = 0;
+  pilot.apply();
+}
+function enterHelm() {
+  game.mode = 'helm';
+  pilot.walk = false;
+  pilot.enabled = false;   // seated: look only, the boat holds you
+  pilot.pos.copy(boat.origin).add(new THREE.Vector3(0, HELM.y, HELM.z - 0.35));
+/* Facing the bow, which is 180 degrees, not zero.
+   *
+   * This heading has dir.z = -cos(yaw), so yaw 0 looks down -Z — toward the stern.
+   * The helm was therefore staring at a bulkhead with the viewport directly
+   * behind its head. */
+  pilot.yaw = Math.PI; pilot.pitch = -0.04;
+  pilot.apply();
+}
+function enterSwim() {
+  game.mode = 'swim';
+  pilot.walk = false;
+  pilot.enabled = true;
+  pilot.pos.copy(boat.origin).add(new THREE.Vector3(6.5, 1.2, 2.0));
+  pilot.apply();
+}
+pilot.toggleMode = () => (game.mode === 'swim' ? enterWalk() : enterSwim());
+pilot.interact = () => {
+  if (game.mode === 'helm') { enterWalk(); pilot.enabled = true; return; }
+  if (game.mode !== 'walk') return;
+  // Only from the seat: an interaction that works from anywhere is a menu.
+  const p = pilot.pos.clone().sub(boat.origin);
+  if (p.z > HELM.z - 2.4 && Math.abs(p.x) < 1.1) enterHelm();
+};
 /* Volumetric cost is steps x resolution and nothing else, so it is the one
  * dial worth exposing. The review harness runs on a software rasteriser where
  * 32 steps at half res takes a minute a frame; real GPUs do not care. Quality
@@ -298,10 +342,15 @@ scene.add(station.mesh);
 const sub = buildSub();
 scene.add(sub.mesh);
 
-/* The cockpit. Rides the camera each frame, so it is authored in camera-local
- * space and never enters the world transform at all. */
-const cabin = buildCabin();
-scene.add(cabin.mesh);
+/* The boat you live in.
+ *
+ * Replaces the camera-glued cockpit outright. That was a windscreen: correct as a
+ * frame around the view, and impossible to leave. This is a place — eighteen
+ * metres of hull with a deck through it and three compartments, sitting on the
+ * canyon floor with a pure translation so the walking collision stays in hull
+ * coordinates. */
+const boat = buildInterior();
+scene.add(boat.mesh);
 
 const beaconSpecs = [
   { pos: [ 34, -390, -12], col: [220, 300, 330], size: 0.55 },
@@ -515,12 +564,17 @@ const game = {
   depth: qNum('depth', 62),
   lampOn: qNum('lamp', 0.0),
   maxDpr: qNum('dpr', 2),
+  mode: 'walk',
   zone: '', pressure: 1,
   fps: 0, frames: 0,
   time: 0,
   poses: Object.keys(POSES),
   scene, camera, renderer, env, post,
   pilot,
+  // Exposed so the review harness can photograph the interior, which no camera
+  // pose can reach — being inside the boat is a mode, not a viewpoint.
+  walk: () => enterWalk(), helm: () => enterHelm(), swim: () => enterSwim(),
+  boatOrigin: () => boat.origin.clone(),
   pose: (n) => { applyPose(n); },
   /* setDepthBand already solved for the offset that yields this depth at the
    * camera's current height; assigning the raw metres afterwards threw that
@@ -531,7 +585,7 @@ const game = {
   setWater: (a, b, t) => env.setWater(a, b, t),
   visibility: () => env.visibility,
   setLayer: (name, on) => {
-    const o = { kelp, rocks, snow, terrain, beacons, station: station.mesh, sub: sub.mesh, cabin: cabin.mesh }[name];
+    const o = { kelp, rocks, snow, terrain, beacons, station: station.mesh, sub: sub.mesh, boat: boat.mesh }[name];
     if (o) o.visible = on;
     if (name === 'hud') document.getElementById('hud').hidden = !on;
   },
@@ -609,22 +663,15 @@ function frame() {
   post.matVol.uniforms.uTime.value = game.time;
   post.matComp.uniforms.uTime.value = game.time;
 
-  /* Bolt the cockpit to the eye.
-   *
-   * Copying the camera transform is what makes a camera-local model behave like
-   * a vehicle the player is sitting in. Done after the pilot update so it cannot
-   * lag the view by a frame — at half a metre, one frame of lag is a visible
-   * wobble of the whole cabin. */
-  cabin.mesh.position.copy(camera.position);
-  cabin.mesh.quaternion.copy(camera.quaternion);
-  const cu = cabin.mat.uniforms;
-  cu.uTime.value = game.time;
-  cu.uPressure.value = game.pressure;
-  cu.uDepth.value = game.depth;
+  const iu = boat.mat.uniforms;
+  iu.uTime.value = game.time;
+  iu.uPressure.value = game.pressure;
   // The alarm answers the hull rating, so the dread is a function of depth
   // rather than a scripted beat.
-  cu.uAlarm.value = Math.min(1, Math.max(0, (game.depth - 260) / 340));
-  cu.uCabinLight.value = 1.0;
+  iu.uAlarm.value = Math.min(1, Math.max(0, (game.depth - 260) / 340));
+  iu.uLamps.value = 1.0;
+  // The interior shades in hull-local space, so it needs the eye there too.
+  iu.uEye.value.copy(camera.position).sub(boat.origin);
 
   renderer.info.reset();
   post.render(scene, camera, env);
@@ -669,6 +716,9 @@ function begin() {
 }
 
 applyPose(qStr('pose', 'shelf'));
+/* Default to standing in the boat. The harness still drives poses explicitly, so
+ * this only affects a human opening the page. */
+if (!qs.has('pose')) enterWalk();
 if (qs.has('depth')) game.setDepth(qNum('depth', 38));
 resize();
 

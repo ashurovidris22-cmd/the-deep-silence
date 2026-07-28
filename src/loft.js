@@ -74,8 +74,14 @@ function norm3(v) {
  */
 export function loftInto(W, stations, {
   count = 18, mat = 0, wear = 0.5, recess = null, capBow = true, capStern = true,
-  facet = false,
+  facet = false, flip = false,
 } = {}) {
+  /* `flip` turns the skin inside out: normals reversed and winding swapped.
+   *
+   * Needed the moment the camera goes inside the loft. A hull viewed from within
+   * is the same surface with the other face toward you, and rendering it with
+   * BackSide alone is not enough — the normals would still point away, so every
+   * interior lamp would light the outside of the boat. */
   const S = stations.length;
 
   // 1. All ring points in 3D.
@@ -164,15 +170,18 @@ export function loftInto(W, stations, {
       const v1 = Math.abs(stations[j + 1].z - stations[0].z) / zTotal;
       const base = W.v;
       const put = (pt, n, u, v) => W._push(pt[0], pt[1], pt[2], n[0], n[1], n[2], mat, wear, u, v);
+      const f = flip ? -1 : 1;
       const nA = facet ? NS[j][i] : VN[j][i];
       const nB = facet ? NS[j][i] : VN[j][(i + 1) % count];
       const nC = facet ? NS[j + 1][i] : VN[j + 1][(i + 1) % count];
       const nD = facet ? NS[j + 1][i] : VN[j + 1][i];
-      put(P[j][i], nA, u0 * 6.0, v0 * zTotal);
-      put(P[j][i1], nB, u1 * 6.0, v0 * zTotal);
-      put(P[j + 1][i1], nC, u1 * 6.0, v1 * zTotal);
-      put(P[j + 1][i], nD, u0 * 6.0, v1 * zTotal);
-      W.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+      const fl = (n) => [n[0] * f, n[1] * f, n[2] * f];
+      put(P[j][i], fl(nA), u0 * 6.0, v0 * zTotal);
+      put(P[j][i1], fl(nB), u1 * 6.0, v0 * zTotal);
+      put(P[j + 1][i1], fl(nC), u1 * 6.0, v1 * zTotal);
+      put(P[j + 1][i], fl(nD), u0 * 6.0, v1 * zTotal);
+      if (flip) W.idx.push(base, base + 2, base + 1, base, base + 3, base + 2);
+      else W.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
     }
   }
 

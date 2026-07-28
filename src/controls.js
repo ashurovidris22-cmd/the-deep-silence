@@ -48,6 +48,23 @@ export class Pilot {
      * it is a submersible leaving the water. */
     this.ceilingY = Infinity;
 
+    /* Walk mode: a different vehicle for the body, not a flag on the same one.
+     *
+     * Swimming and walking are not the same motion with gravity switched on.
+     * Swimming steers where you look, including up and down; walking steers where
+     * you face and leaves the head free to look elsewhere. Sharing one movement
+     * path would mean glancing at the deckhead sends you into it. */
+    this.walk = false;
+    this.walkOrigin = new THREE.Vector3();
+    this.walkBounds = null;      // (localZ, localY) -> half-width in metres
+    this.deckY = 0;              // local Y of the deck
+    this.eyeH = 1.62;
+    this.halfLen = 8.6;
+    this.gravity = 14.0;
+    this.walkSpeed = 3.1;
+    this.grounded = false;
+    this.vy = 0;
+
     // Depth band. Moving vertically inside the scene changes depth by metres;
     // this lets you change it by kilometres, which is the only way to see the
     // whole optical range without a seabed eleven kilometres tall.
@@ -94,6 +111,8 @@ export class Pilot {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       this.keys.add(e.code);
       if (e.code === 'KeyL') this.toggleLamp?.();
+      if (e.code === 'KeyV') this.toggleMode?.();
+      if (e.code === 'KeyE') this.interact?.();
       /* Additive, and now a secondary control rather than the way you descend.
        * With a four-hundred-metre canyon in the world, descending is swimming
        * down it; this only offsets the surface so the optics beyond the world's
@@ -135,6 +154,7 @@ export class Pilot {
     this.band += (this.bandTarget - this.band) * Math.min(1, dt * 1.8);
 
     if (!this.enabled) { this.apply(); return; }
+    if (this.walk) { this._walk(dt); return; }
 
     const k = this.keys;
     const fwd = new THREE.Vector3(
@@ -191,6 +211,56 @@ export class Pilot {
       this.vel.x *= 0.3; this.vel.z *= 0.3;
     }
 
+    this.apply();
+  }
+
+  /* Walking inside the hull.
+   *
+   * Movement is planar and yaw-only, so looking up at the deckhead does not drive
+   * you into it. Collision is evaluated in the hull's own coordinates, which is
+   * the reason the boat is placed with a pure translation and no rotation: the
+   * whole containment test is two clamps and no matrix inversion.
+   */
+  _walk(dt) {
+    const k = this.keys;
+    // Local frame: hull Z is forward, so local = world - origin.
+    const p = this.pos.clone().sub(this.walkOrigin);
+
+    const fwd = new THREE.Vector3(Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+    const right = new THREE.Vector3(fwd.z, 0, -fwd.x);
+    const wish = new THREE.Vector3();
+    if (k.has('KeyW')) wish.add(fwd);
+    if (k.has('KeyS')) wish.sub(fwd);
+    if (k.has('KeyD')) wish.add(right);
+    if (k.has('KeyA')) wish.sub(right);
+    if (wish.lengthSq() > 0) wish.normalize();
+    const spd = this.walkSpeed * (k.has('ShiftLeft') ? 1.7 : 1.0);
+
+    p.x += wish.x * spd * dt;
+    p.z += wish.z * spd * dt;
+
+    /* Gravity, and a floor that is a deck rather than terrain.
+     *
+     * Kept as real integration rather than snapping to the deck, because the step
+     * over each bulkhead coaming is a small fall, and a snap makes that read as a
+     * teleport instead of a footfall. */
+    this.vy -= this.gravity * dt;
+    let feet = p.y - this.eyeH;
+    feet += this.vy * dt;
+    if (feet <= this.deckY) { feet = this.deckY; this.vy = 0; this.grounded = true; }
+    else this.grounded = false;
+    if (this.grounded && k.has('Space')) this.vy = 4.4;
+    p.y = feet + this.eyeH;
+
+    // Containment: the hull narrows fore and aft, so the limit is a function of
+    // where you are, not a constant.
+    p.z = Math.max(-this.halfLen, Math.min(this.halfLen, p.z));
+    const hw = this.walkBounds ? this.walkBounds(p.z, p.y - 0.9) : 1.9;
+    const lim = Math.max(0.25, hw - 0.34);
+    p.x = Math.max(-lim, Math.min(lim, p.x));
+
+    this.pos.copy(p).add(this.walkOrigin);
+    this.vel.set(wish.x * spd, this.vy, wish.z * spd);
     this.apply();
   }
 
