@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>The Deep Silence</title>
+<style>
+  :root { color-scheme: dark; }
+  html,body { margin:0; height:100%; background:#000; overflow:hidden; }
+  canvas { display:block; width:100vw; height:100vh; }
+
+  /* Boot gate. The renderer warms shaders and bakes noise before first frame;
+     showing a black screen for two seconds reads as a hang, so hold a card. */
+  #boot {
+    position:fixed; inset:0; z-index:10; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:28px;
+    background:#04080a; transition:opacity .9s ease;
+    font:400 13px/1.7 ui-monospace,SFMono-Regular,Menlo,monospace;
+    letter-spacing:.34em; text-transform:uppercase; color:#4d7f8c;
+  }
+  #boot h1 {
+    margin:0; font:300 clamp(26px,5.4vw,58px)/1 ui-monospace,monospace;
+    letter-spacing:.42em; color:#9fd3dd; text-indent:.42em;
+    text-shadow:0 0 34px rgba(80,190,215,.34);
+  }
+  #bootSub { opacity:.5; font-size:11px; }
+  #bootStart {
+    appearance:none; cursor:pointer; padding:15px 40px;
+    background:transparent; color:#9fd3dd;
+    border:1px solid rgba(159,211,221,.32); border-radius:1px;
+    font:400 12px/1 ui-monospace,monospace; letter-spacing:.34em;
+    text-transform:uppercase; transition:.28s;
+  }
+  #bootStart:hover { background:rgba(159,211,221,.09); border-color:rgba(159,211,221,.62); }
+  #bootStart[hidden] { display:none; }
+  #bootProg { font-size:11px; opacity:.42; }
+
+  #hud {
+    position:fixed; left:0; right:0; bottom:0; z-index:5; padding:20px 26px;
+    display:flex; justify-content:space-between; align-items:flex-end;
+    font:400 11px/1.5 ui-monospace,monospace; letter-spacing:.2em;
+    color:rgba(150,205,215,.62); text-transform:uppercase;
+    text-shadow:0 1px 12px rgba(0,0,0,.9); pointer-events:none;
+  }
+  #hud b { display:block; font-weight:400; font-size:22px; letter-spacing:.1em;
+           color:rgba(190,235,245,.9); }
+  #hud .u { font-size:10px; opacity:.5; }
+  #hud[hidden] { display:none; }
+
+  #stats {
+    position:fixed; right:10px; top:10px; z-index:6;
+    font:400 10px/1.5 ui-monospace,monospace; color:rgba(140,210,225,.5);
+    text-align:right; white-space:pre; pointer-events:none;
+  }
+  #stats[hidden] { display:none; }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+
+<div id="hud" hidden>
+  <div><span class="u">Depth</span><b id="hDepth">0</b><span class="u">metres</span></div>
+  <div style="text-align:right"><span class="u">Hull</span><b id="hHull">100</b><span class="u">percent</span></div>
+</div>
+<div id="stats" hidden></div>
+
+<div id="boot">
+  <h1>The Deep Silence</h1>
+  <div id="bootSub">Descent vehicle · pressure hull rated 6000 m</div>
+  <button id="bootStart" hidden>Begin descent</button>
+  <div id="bootProg">initialising</div>
+</div>
+
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.js" } }
+</script>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
