@@ -67,6 +67,16 @@ export const CANYON_Y = -398;     // ~438 m deep: silt, no sun at all
 export const CANYON_HALF = 96;    // half-width of the flat floor
 export const RIM = 330;           // where the wall meets the shelf
 
+/* One edge of the world, for everything that moves.
+ *
+ * The swimmer was clamped to 280 m and the vessel to nothing at all, so a player
+ * could drive the boat out past a wall they could not swim through — reported,
+ * reasonably, as the submarine ignoring the edge of the map. Both now use this,
+ * and it is set from the terrain mesh rather than by feel: buildTerrain spans
+ * 1200 m, so the ground exists out to 600, and stopping at 520 keeps eighty
+ * metres of margin so the boundary is never the visible mesh edge. */
+export const WORLD_R = 520;
+
 /**
  * Height of the seabed at a world XZ, in metres.
  *

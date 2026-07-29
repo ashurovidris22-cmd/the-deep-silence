@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { seabedHeight } from './terrain.js';
+import { seabedHeight, WORLD_R } from './terrain.js';
 
 /* Piloting a submersible, not walking around a level.
  *
@@ -64,6 +64,15 @@ export class Pilot {
      * for the vessel every frame, has to solve the same problem backwards and
      * gets it wrong the moment the frame rotates between two updates. */
     this.frame = null;
+    /* Things in the water that are not the seabed.
+     *
+     * Swimming collided with the heightfield and with absolutely nothing else,
+     * so the station, the wreck and the player's own submarine were all fog you
+     * could pass through — which is worse than having no collision at all,
+     * because a hull you can walk inside and then swim through tells you the
+     * whole world is scenery. Refreshed each frame by main.js, since one of the
+     * blockers is the boat and the boat moves. */
+    this.blockers = [];
     this.walkOrigin = new THREE.Vector3();
     this.walkBounds = null;      // (localZ, localY) -> half-width in metres
     this.deckY = 0;              // local Y of the deck
@@ -213,6 +222,8 @@ export class Pilot {
     this.vel.multiplyScalar(Math.exp(-this.drag * dt));
     this.pos.addScaledVector(this.vel, dt);
 
+    this._avoid();
+
     /* Do not sink through the seabed.
      *
      * Checked against the same function that built the mesh, so the collision
@@ -230,12 +241,16 @@ export class Pilot {
       if (this.vel.y > 0) this.vel.y = 0;
     }
 
-    // Keep inside the built terrain. Beyond it the heightfield still evaluates
-    // but there is no mesh, so you would fly out over a hole in the world.
-    const R = 280;
+    /* Keep inside the built terrain. Beyond it the heightfield still evaluates
+     * but there is no mesh, so you would swim out over a hole in the world.
+     *
+     * Shared with the vessel now. It used to be 280 here and absent there, so
+     * the boat could be driven straight through a boundary the swimmer bounced
+     * off — which is exactly the kind of inconsistency that reads as the game
+     * being broken rather than as a rule. */
     const d2 = this.pos.x * this.pos.x + this.pos.z * this.pos.z;
-    if (d2 > R * R) {
-      const s = R / Math.sqrt(d2);
+    if (d2 > WORLD_R * WORLD_R) {
+      const s = WORLD_R / Math.sqrt(d2);
       this.pos.x *= s; this.pos.z *= s;
       this.vel.x *= 0.3; this.vel.z *= 0.3;
     }
@@ -336,6 +351,66 @@ export class Pilot {
 
     this.vel.set(wish.x * spd, this.vy, wish.z * spd);
     this.apply();
+  }
+
+  /**
+   * Push out of the solid things in the water.
+   *
+   * Capsules and boxes rather than triangles, for the same reason the interior
+   * uses boxes: a mesh collider against the station's twenty thousand triangles
+   * arrives at the same answer a dozen primitives give, and the primitives are
+   * derived from the same numbers that placed the geometry so they cannot drift
+   * out of agreement with it.
+   */
+  _avoid() {
+    const R = 0.45;                       // the swimmer's own radius
+    for (const b of this.blockers) {
+      if (b.k === 'box') {
+        const cx = Math.max(b.c[0] - b.h[0], Math.min(this.pos.x, b.c[0] + b.h[0]));
+        const cy = Math.max(b.c[1] - b.h[1], Math.min(this.pos.y, b.c[1] + b.h[1]));
+        const cz = Math.max(b.c[2] - b.h[2], Math.min(this.pos.z, b.c[2] + b.h[2]));
+        let dx = this.pos.x - cx, dy = this.pos.y - cy, dz = this.pos.z - cz;
+        let d = Math.hypot(dx, dy, dz);
+        if (d >= R) continue;
+        if (d < 1e-4) {
+          /* Dead inside the box: eject along the shallowest face, exactly as the
+           * walking collision does. Any other choice can push the player further
+           * in, and being ejected through the far side of a platform is much more
+           * alarming than being stopped by it. */
+          const ox = b.h[0] - Math.abs(this.pos.x - b.c[0]);
+          const oy = b.h[1] - Math.abs(this.pos.y - b.c[1]);
+          const oz = b.h[2] - Math.abs(this.pos.z - b.c[2]);
+          if (oy <= ox && oy <= oz) { this.pos.y += (this.pos.y > b.c[1] ? 1 : -1) * (oy + R); }
+          else if (ox <= oz) { this.pos.x += (this.pos.x > b.c[0] ? 1 : -1) * (ox + R); }
+          else { this.pos.z += (this.pos.z > b.c[2] ? 1 : -1) * (oz + R); }
+          this.vel.multiplyScalar(0.2);
+          continue;
+        }
+        const push = (R - d) / d;
+        this.pos.x += dx * push; this.pos.y += dy * push; this.pos.z += dz * push;
+        const n = new THREE.Vector3(dx / d, dy / d, dz / d);
+        const into = this.vel.dot(n);
+        if (into < 0) this.vel.addScaledVector(n, -into);
+      } else {
+        // Capsule: closest point on its axis, then the same sphere response.
+        const ax = b.a[0], ay = b.a[1], az = b.a[2];
+        const ex = b.b[0] - ax, ey = b.b[1] - ay, ez = b.b[2] - az;
+        const L2 = ex * ex + ey * ey + ez * ez || 1e-6;
+        let t = ((this.pos.x - ax) * ex + (this.pos.y - ay) * ey + (this.pos.z - az) * ez) / L2;
+        t = Math.max(0, Math.min(1, t));
+        const cx = ax + ex * t, cy = ay + ey * t, cz = az + ez * t;
+        const dx = this.pos.x - cx, dy = this.pos.y - cy, dz = this.pos.z - cz;
+        const lim = b.r + R;
+        let d = Math.hypot(dx, dy, dz);
+        if (d >= lim) continue;
+        if (d < 1e-4) { this.pos.y += lim; this.vel.multiplyScalar(0.2); continue; }
+        const push = (lim - d) / d;
+        this.pos.x += dx * push; this.pos.y += dy * push; this.pos.z += dz * push;
+        const n = new THREE.Vector3(dx / d, dy / d, dz / d);
+        const into = this.vel.dot(n);
+        if (into < 0) this.vel.addScaledVector(n, -into);
+      }
+    }
   }
 
   get speed() { return this.vel.length(); }

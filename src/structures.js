@@ -475,6 +475,14 @@ export function buildStation(seed = SEEDS.debris) {
   const rand = rng(seed);
   const W = new Welder();
   const lights = [];
+  /* Collision volumes, derived from the same locals that place the geometry.
+   *
+   * Swimming collided with the heightfield and nothing else, so the whole
+   * installation was fog — you could pass through the platform, the towers and
+   * the walkway. A dozen primitives taken from the numbers already in this
+   * function arrive at the same answer a mesh collider would, and cannot drift
+   * out of agreement with what is drawn. */
+  const blockers = [];
 
   const px = 30, pz = -18;
   const deckY = seabedHeight(px, pz) + 6.4;
@@ -489,10 +497,14 @@ export function buildStation(seed = SEEDS.debris) {
   for (let i = -3; i <= 3; i++) {
     W.box(px + i * 2.2, deckY - 0.22, pz, 0.18, 0.30, 11.2, 0, M_STEEL, 0.6);
   }
+  // The deck as one slab, plus its four legs.
+  blockers.push({ k: 'box', c: [px, deckY, pz], h: [7.8, 0.5, 5.8] });
   for (const [lx, lz] of [[-7.2, -5.2], [7.2, -5.2], [7.2, 5.2], [-7.2, 5.2]]) {
     const gx = px + lx, gz = pz + lz;
-    W.tube(gx, deckY - 0.3, gz, gx, seabedHeight(gx, gz) - 0.6, gz, 0.19, 8, M_PIPE, 0.7);
-    W.box(gx, seabedHeight(gx, gz) + 0.3, gz, 1.5, 0.6, 1.5, 0, M_CONC, 0.4);
+    const gy = seabedHeight(gx, gz);
+    W.tube(gx, deckY - 0.3, gz, gx, gy - 0.6, gz, 0.19, 8, M_PIPE, 0.7);
+    W.box(gx, gy + 0.3, gz, 1.5, 0.6, 1.5, 0, M_CONC, 0.4);
+    blockers.push({ k: 'cap', a: [gx, gy, gz], b: [gx, deckY, gz], r: 0.45 });
   }
   // Handrail around three sides of the deck, so the fourth reads as the way on.
   for (let i = -3; i <= 3; i++) {
@@ -504,13 +516,20 @@ export function buildStation(seed = SEEDS.debris) {
   // Two towers, and their lamps are the far red points in the dark.
   const tA = truss(W, rand, px - 9.5, pz + 2.0, 17 + rand() * 4);
   const tB = truss(W, rand, px + 9.0, pz - 7.5, 13 + rand() * 4);
+  for (const [tx, tz, top] of [[px - 9.5, pz + 2.0, tA.top], [px + 9.0, pz - 7.5, tB.top]]) {
+    blockers.push({ k: 'cap', a: [tx, seabedHeight(tx, tz) - 0.5, tz], b: [tx, top, tz], r: 1.5 });
+  }
   lights.push({ pos: [px - 9.5, tA.top + 0.4, pz + 2.0], col: [300, 42, 16], size: 0.28 });
   lights.push({ pos: [px + 9.0, tB.top + 0.4, pz - 7.5], col: [300, 42, 16], size: 0.28 });
 
-  // The walkway out into nothing.
+  /* The walkway out into nothing. Its blocker is a capsule along the run rather
+   * than a box, because the walkway is yawed and an axis-aligned box round a
+   * diagonal 80 m long would wall off a quarter of the canyon. */
   catwalk(W, rand, px, pz + 6.2, px - 26, pz + 74, deckY - 0.4);
+  blockers.push({ k: 'cap', a: [px, deckY - 0.4, pz + 6.2], b: [px - 26, deckY - 0.4, pz + 74], r: 1.3 });
   // A second, shorter run at an angle, half collapsed.
   catwalk(W, rand, px - 6, pz - 6.5, px - 44, pz - 30, deckY - 1.8);
+  blockers.push({ k: 'cap', a: [px - 6, deckY - 1.8, pz - 6.5], b: [px - 44, deckY - 1.8, pz - 30], r: 1.3 });
 
   // Two working lamps on the deck: something has power, which is worse.
   lights.push({ pos: [px - 5.5, deckY + 1.9, pz + 4.6], col: [150, 190, 205], size: 0.34 });
@@ -524,5 +543,5 @@ export function buildStation(seed = SEEDS.debris) {
   const mesh = new THREE.Mesh(geo, structureMaterial());
   mesh.frustumCulled = false;
   mesh.name = 'station';
-  return { mesh, lights };
+  return { mesh, lights, blockers };
 }

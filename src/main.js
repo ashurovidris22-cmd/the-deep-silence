@@ -6,7 +6,7 @@ import { buildTurf, buildPens, buildSponges, buildWhips } from './flora.js';
 import { buildSnow } from './snow.js';
 import { buildStation } from './structures.js';
 import { buildSub } from './sub.js';
-import { buildInterior, interiorSolids, hullHalfWidth, DECK_Y, EYE, HULL_LEN, HELM } from './interior.js';
+import { buildInterior, interiorSolids, hullHalfWidth, DECK_Y, EYE, HULL_LEN, HULL_R, HELM } from './interior.js';
 import { Post } from './post.js';
 import { Pilot } from './controls.js';
 import { Vessel } from './vessel.js';
@@ -481,6 +481,13 @@ const vessel = new Vessel(boat.origin.clone(), 0);
 const ext = buildExterior();
 scene.add(ext.mesh);
 let propAngle = 0;
+
+/* What a swimmer can collide with. Static installations once, the boat every
+ * frame — see the frame loop. */
+const boatCapA = new THREE.Vector3();
+const boatCapB = new THREE.Vector3();
+const boatBlocker = { k: 'cap', a: [0, 0, 0], b: [0, 0, 0], r: HULL_R + 0.35 };
+pilot.blockers = [boatBlocker, ...station.blockers, ...sub.blockers];
 
 const beaconSpecs = [
   { pos: [ 34, -390, -12], col: [220, 300, 330], size: 0.55 },
@@ -972,6 +979,15 @@ function frame() {
   }
   vessel.update(dt, env.surfaceY - MIN_DEPTH);
   vessel.applyTo(boat.mesh);
+  /* Refresh what the swimmer can bump into. The static installations never move,
+   * so they are appended once; the boat does, so her capsule is rebuilt from the
+   * hull's own half-length every frame. Swimming through your own submarine was
+   * the most jarring of the four — a hull you can walk around inside and then
+   * pass straight through says the whole world is a painting. */
+  vessel.toWorld(new THREE.Vector3(0, 0, HULL_LEN - 1.0), boatCapA);
+  vessel.toWorld(new THREE.Vector3(0, 0, -HULL_LEN + 1.0), boatCapB);
+  boatBlocker.a[0] = boatCapA.x; boatBlocker.a[1] = boatCapA.y; boatBlocker.a[2] = boatCapA.z;
+  boatBlocker.b[0] = boatCapB.x; boatBlocker.b[1] = boatCapB.y; boatBlocker.b[2] = boatCapB.z;
   /* Rotor speed follows the telegraph, not the speed through the water, because
    * that is the honest relationship: order full ahead against a rock and the
    * screw still turns. It is also the only way the player can tell from outside
@@ -1041,6 +1057,27 @@ function frame() {
   iu.uTrim.value = vessel.vel.y;
   // The interior shades in hull-local space, so it needs the eye there too.
   vessel.toLocal(camera.position, iu.uEye.value);
+
+  /* Draw the cabin only when the eye is in it.
+   *
+   * The interior material is DoubleSide — it has to be, because the deck, the
+   * bulkheads and every piece of furniture is a single-sided quad — so the
+   * pressure hull's inside-out skin renders from *outside* the boat as well.
+   * And it renders wrongly there by construction: the cabin writes alpha 0,
+   * which exempts it from the water and hands it the indoor exposure, so from
+   * the water it appeared as a pale fog-free blob floating in a scene that has
+   * fog. Where the exterior skin tapers faster than the interior one — at both
+   * ends — pieces of it stuck out past the real hull as detached glowing plates.
+   * That is what a player photographed and called strange glowing things.
+   *
+   * Tested against the hull envelope rather than against the mode, because the
+   * review cameras are outside the boat without being in swim mode. It also
+   * saves drawing seven hundred thousand triangles of furniture whenever the
+   * player is not aboard. */
+  const eyeL = iu.uEye.value;
+  const aboard = Math.abs(eyeL.z) < HULL_LEN + 0.5
+    && eyeL.x * eyeL.x + eyeL.y * eyeL.y < (HULL_R + 0.35) * (HULL_R + 0.35);
+  boat.mesh.visible = aboard;
 
   renderer.info.reset();
   post.render(scene, camera, env);

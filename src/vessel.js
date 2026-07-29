@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { seabedHeight } from './terrain.js';
+import { seabedHeight, WORLD_R } from './terrain.js';
 import { HULL_LEN, HULL_R } from './fitout.js';
 
 /* The boat, as a thing that moves.
@@ -206,6 +206,23 @@ export class Vessel {
       this.grounded = false;
     }
     this.contact *= Math.exp(-dt * 1.6);
+
+    /* --- the edge of the world, which she was ignoring entirely.
+     *
+     * The swimmer had a limit and the vessel had none, so she could be driven
+     * out through a boundary the player could not swim through. Same constant
+     * for both now. Eased rather than snapped, because a hundred tonnes hitting
+     * an invisible wall dead should feel like grounding, not like a teleport. */
+    const d2 = this.pos.x * this.pos.x + this.pos.z * this.pos.z;
+    if (d2 > WORLD_R * WORLD_R) {
+      const k = WORLD_R / Math.sqrt(d2);
+      this.pos.x *= k; this.pos.z *= k;
+      const nx = -this.pos.x / WORLD_R, nz = -this.pos.z / WORLD_R;
+      const into = this.vel.x * nx + this.vel.z * nz;
+      if (into < 0) { this.vel.x -= nx * into; this.vel.z -= nz * into; }
+      this.vel.multiplyScalar(Math.exp(-2.0 * dt));
+      this.contact = Math.max(this.contact, 0.4);
+    }
 
     // --- and the ceiling. The vehicle stays under the water it is built for.
     const lid = ceilingY - HULL_R - 1.0;

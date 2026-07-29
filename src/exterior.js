@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { Welder, structureMaterial, MAT } from './structures.js';
-import { loftInto, fairStations } from './loft.js';
+import { loftInto, fairStations, ringProfile } from './loft.js';
 import { HULL_LEN, HULL_R, shellX } from './fitout.js';
 
 /* The outside of the boat you have been living in.
@@ -41,9 +41,42 @@ const W_MAX = HULL_R * 2;    // interior full width at the widest station
  *
  * That is a whole class of bug rather than four separate ones, and it has one
  * answer: ask the hull where its skin is at the y and z you are about to build
- * at, and add the clearance you need. `shellX` is the same function the interior
- * and the walking collision use, so the three cannot disagree. */
-const outboard = (z, y, clear) => shellX(z, y) + PLATE + clear;
+ * at, and add the clearance you need.
+ *
+ * The first version of that answer used `shellX`, the analytic half-width the
+ * interior and the walking collision use — and it was still wrong, because
+ * `fairStations` interpolates with Catmull-Rom and Catmull-Rom overshoots its
+ * control points. Measured at 60 stations, the *drawn* skin stands as much as
+ * 385 mm outside `shellX + PLATE`, worst at the tapered ends. Every clearance
+ * here was between 80 and 260 mm, so at the ends the fittings were inside the
+ * hull they were supposed to be bolted to, and from the cabin they showed
+ * through as teal panels lit by the outdoor water material.
+ *
+ * So ask the geometry, not the formula. `skinX` reads the same faired station
+ * list that `loftInto` consumes, so a fitting cannot be inside a skin that was
+ * built from the same numbers. `shellX` stays for the collision, which is what
+ * it is for. */
+let SKIN = null;
+/**
+ * Widest |x| the drawn skin reaches near (z, y), over a band `span` tall.
+ *
+ * The band is not a nicety. A fitting is 0.6 m tall and the section changes fast
+ * near the bow, so sampling the skin only at the fitting's centre height leaves
+ * its lower corner inside a hull that is wider 30 cm further down. Checked
+ * numerically at 0.3 m intervals along the whole run: with a point sample the
+ * tightest clearance was minus 78 mm; with the band it is positive everywhere.
+ */
+function skinX(z, y, span = 0.45) {
+  let best = 0;
+  for (const st of SKIN) {
+    if (Math.abs(st.z - z) > 1.1) continue;
+    for (const [px, py] of ringProfile(st.w, st.h, st.sq, 72)) {
+      if (Math.abs(py - y) < span) best = Math.max(best, Math.abs(px));
+    }
+  }
+  return best;
+}
+const outboard = (z, y, clear, span) => skinX(z, y, span) + clear;
 
 export function buildExterior() {
   const W = new Welder();
@@ -67,7 +100,11 @@ export function buildExterior() {
    * beam is a 77 cm facet, which at ten metres is over a hundred pixels of flat
    * shading — the definition of the low-poly look. Sixty-four brings it to
    * 24 cm, and with smooth normals it reads as a curve. */
-  loftInto(W, fairStations(control, 54), {
+  /* Faired once, then kept: the loft consumes it and every fitting measures
+   * against it. Two consumers of one list cannot disagree about where the hull
+   * is; two independent derivations demonstrably do. */
+  SKIN = fairStations(control, 54);
+  loftInto(W, SKIN, {
     count: 64, mat: MAT.HULL, wear: 0.55, capBow: false, capStern: false,
   });
 
@@ -80,10 +117,10 @@ export function buildExterior() {
   for (const side of [-1, 1]) {
     for (let i = 0; i < 9; i++) {
       const z = -7.2 + i * 1.8;
-      W.box(side * outboard(z, -0.55, 0.19), -0.55, z, 0.34, 0.62, 1.15, 0, MAT.STEEL, 0.6);
-      const vx = side * outboard(z, -0.88, 0.12);
+      W.box(side * outboard(z, -0.55, 0.24, 0.55), -0.55, z, 0.34, 0.62, 1.15, 0, MAT.STEEL, 0.6);
+      const vx = side * outboard(z, -0.88, 0.16, 0.40);
       W.tube(vx, -0.88, z, vx + side * 0.05, -0.86, z, 0.10, 10, MAT.PIPE, 0.8);
-      const rx = side * outboard(z, 0.42, 0.08);
+      const rx = side * outboard(z, 0.42, 0.12, 0.40);
       W.tube(rx, 0.42, z, rx + side * 0.05, 0.44, z, 0.055, 8, MAT.PIPE, 0.75);
     }
   }
@@ -102,8 +139,13 @@ export function buildExterior() {
    * machinery space. A tube starting *above* the crown cannot do that, and the
    * hull skin hides the join from outside. */
   const HZ = -1.5;
-  const crown = HULL_R * Math.sqrt(Math.max(0.06, 1 - Math.pow(Math.abs(HZ) / HULL_LEN, 3.2)));
-  const TB = crown + 0.06;                 // trunk base, clear of the pressure hull
+  /* The crown of the *drawn* skin, for the same reason. */
+  let crown = 0;
+  for (const st of SKIN) {
+    if (Math.abs(st.z - HZ) > 0.5) continue;
+    for (const [, py] of ringProfile(st.w, st.h, st.sq, 72)) crown = Math.max(crown, py);
+  }
+  const TB = crown + 0.04;                 // trunk base, clear of the pressure hull
   W.tube(0, TB, HZ, 0, TB + 0.62, HZ, 0.64, 34, MAT.HULL, 0.5);
   W.tube(0, TB - 0.02, HZ, 0, TB + 0.10, HZ, 0.76, 34, MAT.STEEL, 0.6);   // flared base
   // The hatch itself, its coaming and the dogs round it.

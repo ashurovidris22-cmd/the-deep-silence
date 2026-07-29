@@ -717,6 +717,16 @@ function interiorMaterial(atlas) {
          *   g.dbg(2)  perturbed normal
          */
         if (uDebug > 0.5) {
+          if (uDebug > 2.5) {
+            /* Material id as a colour ramp. The probe the ledger asked for.
+             *
+             * "Which material is that" is not answerable by reasoning — three
+             * subsystems in this project have looked guilty and been innocent.
+             * One frame in this mode names it. Red counts the id in fours, green
+             * the remainder, so 0-11 are all distinguishable by eye. */
+            gl_FragColor = vec4(floor(vMat / 4.0) / 3.0, fract(vMat / 4.0), 0.35, 0.0);
+            return;
+          }
           gl_FragColor = uDebug < 1.5
             ? vec4(vec3(0.5 + h0 * 220.0), 0.0)
             : vec4(n * 0.5 + 0.5, 0.0);

@@ -218,36 +218,71 @@ messages, at more length.
   atan2(dy, L)` — the interior station table uses an `AIM()` helper for exactly
   this, after the hand-written version missed its subject at every close range.
 
-### OPEN DEFECT — one bright cyan quad inside the machinery space
+### Added by the bug-report pass
 
-Introduced somewhere in the exterior-hull pass and **not yet identified**. What is
-established, so the next session does not start over:
+Four things a player reported in one message, and three of them were one theme:
+**anything that is not the seabed had no physical or visual boundary.**
 
-- It is a flat rectangle roughly 0.9 x 0.8 m on the **port** shell around
-  z = -2 to -3.6, visible from the `stern` station (looking aft, port appears on
-  the *right* of frame — worth remembering before hunting on the wrong side).
-- It carries a soft 6x5 checkerboard, which is the `I.PANEL` breaker lattice, so
-  the switchboard face at z = -3.55 and the scrubber face at z = -1.95 are the
-  only two candidates.
-- It is **absent** from the last pushed build's `u-stern` frame, so it is a
-  regression from this session, not something old.
-- Three of its four siblings were the exterior hull's fittings coming through
-  the pressure hull (fixed — see below); this one survived that fix, so it is
-  *not* an exterior penetration.
-- Arithmetic says it should not be bright: the panel's albedo tops out at 0.115,
-  the deckhead lamp two metres away contributes about 0.12, and the emissive term
-  is masked to the bottom eighth of the panel where the indicator lamps are.
-  Measured brightness is far above that, so something is adding light that the
-  branch does not account for.
-- The distance fade added for lattice aliasing does not apply at this range
-  (2.5 m), so aliasing is not the cause either.
+- **The cabin was visible from outside the boat.** `interiorMaterial` is
+  DoubleSide — it has to be, because the deck, the bulkheads and every piece of
+  furniture is a single-sided quad — so the pressure hull's inside-out skin also
+  renders from *outside*. And it renders wrongly there by construction: the cabin
+  writes alpha 0, which exempts it from the water and hands it the indoor
+  exposure. From the water it appeared as a pale fog-free blob in a scene that has
+  fog, and where the exterior skin tapers faster than the interior one — at both
+  ends — pieces stuck out past the real hull as detached glowing plates. Reported
+  as "strange glowing things on the outside of the sub", which is exactly what
+  they were. Now gated on the eye being inside the hull envelope, tested against
+  the geometry rather than against the mode, because the review cameras are
+  outside the boat without being in swim mode. It also stops drawing 30k
+  triangles of furniture whenever nobody is aboard.
+- **Swimming collided with the heightfield and with nothing else.** The station,
+  the wreck and the player's own submarine were all fog you could pass through.
+  A hull you can walk around inside and then swim straight through says the whole
+  world is a painting. Capsules and boxes now, derived in the builders from the
+  same locals that placed the geometry, so they cannot drift out of agreement
+  with what is drawn. The boat's capsule is rebuilt every frame from HULL_LEN
+  because the boat moves.
+- **The swimmer had an edge of the world and the vessel had none.** 280 m for one
+  and nothing for the other, so the boat could be driven straight through a
+  boundary the player bounced off. Both use `WORLD_R` now, and it is set from the
+  terrain mesh rather than by feel: `buildTerrain` spans 1200 m so the ground
+  exists to 600, and stopping at 520 leaves 80 m of margin so the limit is never
+  the visible mesh edge.
 
-**Next step is one render, not more reasoning:** add `uDebug == 3` to the
-interior fragment shader outputting `vMat / 12.0` as greyscale and shoot the
-`stern` station. That names the material in a single frame. Three subsystems have
-already looked guilty in this project and been innocent; do not skip the probe.
+**Lesson worth keeping:** the layer toggles are a debugging instrument, not just a
+review convenience. `g.setLayer('hull', false)` identified the glowing plates in
+one frame after two rounds of reasoning had failed — switching a subsystem off is
+still the fastest way to find out what is drawing something.
 
-### Added by the piloting pass
+### CLOSED — the bright cyan quads were the exterior showing through
+
+Identified by bisection, not by argument: one frame with `g.setLayer('hull',
+false)` and every teal panel vanished. They were the exterior hull's saddle
+tanks, vents and trunk, seen from inside the cabin and lit by the *outdoor* water
+material, which is why they were teal in a room that has no fog.
+
+The interesting part is why the first fix did not take. Fittings were placed
+against `shellX`, the analytic half-width the interior and the walking collision
+use — but the skin is lofted through `fairStations`, and Catmull-Rom overshoots
+its control points. Measured over 60 stations, **the drawn skin stands up to
+385 mm outside `shellX + PLATE`**, worst at the tapered ends, while every
+clearance was between 80 and 260 mm. The formula and the geometry were two
+independent derivations of "where is the hull", and they disagreed by more than
+the margin.
+
+Fixed by measuring against the geometry: `skinX` reads the same faired station
+list that `loftInto` consumes, so a fitting cannot be inside a skin built from
+the same numbers. It samples a *band* of y rather than a point, because a 0.6 m
+tank near the bow has its lower corner in a section 30 cm wider than its centre —
+with a point sample the tightest clearance was still minus 78 mm.
+
+Verified as arithmetic rather than as a screenshot: all 27 placements checked
+against the drawn profile, tightest clearance +65 mm. For a question of the form
+"is this inside that", a number is a stronger answer than a frame — and it costs
+a second instead of four minutes.
+
+### Added by the piloting pass### Added by the piloting pass
 
 - **Caustics were riding on the bio floor, so they never switched off.**
   `ambientAt()` returns sunlight *plus* the constant bio/thermal glow, and the

@@ -128,5 +128,20 @@ export function buildSub(seed = SEEDS.debris ^ 0x51) {
   mesh.matrixAutoUpdate = false;
   mesh.updateMatrixWorld(true);
 
-  return { mesh, at: [x, gy, z] };
+  /* One capsule along the wreck's own axis, in world space.
+   *
+   * She is yawed 2.35 rad and rolled, so the axis runs along
+   * (sin yaw, 0, cos yaw) through the placement point. Deriving it from the same
+   * rotation the mesh uses is the difference between a blocker that matches the
+   * hull and one that is 45 degrees out — and the second is worse than none,
+   * because the player is stopped by empty water beside a wreck they can still
+   * swim through. */
+  const yaw = 2.35, half = 4.9, r = 1.55;
+  const ax = Math.sin(yaw) * half, az = Math.cos(yaw) * half;
+  const cy = gy + 1.85;
+  return {
+    mesh,
+    at: [x, gy, z],
+    blockers: [{ k: 'cap', a: [x - ax, cy, z - az], b: [x + ax, cy, z + az], r }],
+  };
 }
