@@ -48,8 +48,13 @@ survive into a new session:
 - **Pages config:** Deploy from a branch → `main` → `/ (root)`. Public repo, so it
   is free. No subscription is needed for any of this.
 
-Useful URLs while working: `?stats=1`, `?pose=<name>`, `?depth=`, `?dof=0`,
-`?vsteps=`, `?vscale=`, `?invertY=1`, `?sens=`, `?auto=1`, `?hud=0`.
+Useful URLs while working: `?stats=1`, `?pose=<name>`, `?dof=0`, `?vsteps=`,
+`?vscale=`, `?invertY=1`, `?sens=`, `?auto=1`, `?hud=0`.
+
+**`?depth=` now requires `?auto=1`,** and that is deliberate — see the ledger. It
+moves the sea surface to fake a depth, which desynchronises the world from the
+player's position, and it cost three review rounds when a stray copy of it in a
+URL put a human's whole session at 14 m while they stood on the canyon floor.
 
 ---
 
@@ -104,6 +109,29 @@ were innocent. `tools/shot.mjs` exists to bisect exactly that.
 
 Under software rendering a frame takes 10–30 s. Use `?vsteps=12&vscale=0.4` while
 iterating; take quality verdicts at full settings.
+
+**In-game instruments, because the sandbox cannot see everything:**
+
+- **F3** — the diagnostic panel. fps, resolution, draws, triangles, depth, zone,
+  visibility, pressure, mode, lamp, exposure, depth band, the sun term at the eye,
+  camera and vessel positions, heading, way, throttle, ballast, ground contact.
+  Built after three sessions of failing to answer a question that this panel
+  settled in one screenshot. **When asking the player for a measurement, ask for
+  a photograph of this rather than for a description.**
+- `g.dbg(1)` height field, `g.dbg(2)` perturbed normal, `g.dbg(3)` material id —
+  inside the boat. "Which material is that" is not answerable by reasoning.
+- `g.inside(name)` for the eleven interior stations, `g.outside(deg, dist, h)` for
+  a camera aimed at the hull from the water, `g.setLayer(name, false)` to switch a
+  subsystem off. **The layer toggles are a debugging instrument, not a review
+  convenience** — they identified two bugs this week in one frame each after
+  reasoning had failed on both.
+
+**Some questions are arithmetic, not pictures.** "Is this fitting inside that
+hull" was answered by checking 27 placements against the drawn profile in node in
+one second, after a screenshot round had failed to settle it. `src/vessel.js` has
+no renderer dependency for the same reason: the sandbox runs at 1–2 fps with `dt`
+clamped, so eight seconds of wall clock is under a second of simulated time and
+*every* dynamics test has to run as pure maths at a fixed 60 Hz.
 
 ---
 
@@ -218,6 +246,63 @@ messages, at more length.
   atan2(dy, L)` — the interior station table uses an `AIM()` helper for exactly
   this, after the hand-written version missed its subject at every close range.
 
+### SOLVED — the bright teal canyon floor, after three sessions
+
+The diagnostic panel answered it in one screenshot, and the answer was not in any
+shader:
+
+```
+depth 14.0 m   epipelagic   vis 21.4 m   2 atm
+mode walk   lamp 0.18   exposure 0.080   band -410 m
+sun at eye  2.0e-1  9.5e+0  1.1e+1
+eye  75 -384 13   surface -370
+```
+
+**`band -410`.** The depth band had put the sea surface at y = -370 — three
+hundred and seventy metres *below* mean sea level, and fourteen metres above a
+player standing on the canyon floor at y = -384. So the game was correctly
+rendering fourteen metres of water: full daylight, caustics on the seabed, bright
+teal, red mostly absorbed. Every measurement I took of that screenshot was right;
+the scene simply was not at the depth the geometry said.
+
+How it happened: `setDepthBand(m)` solves `band = m + cameraY - SEA_LEVEL` and was
+unclamped, so asking for 14 m while the camera sat at -384 gave -410. It was
+wired to a `?depth=` URL parameter, so a pasted link put a human's whole session
+at the wrong depth for as long as the tab stayed open — even though the
+function's own comment says "Normal play never calls this".
+
+Two fixes, and the second matters more than the first: the band is clamped at
+zero, because a surface below sea level has no meaning in a world where depth is
+derived from position; and the parameter is gated behind `auto=1` so a review
+tool cannot reach a player.
+
+**The lesson is about instruments, not about clamps.** Three review rounds chased
+this as a shader bug — caustics, exposure metering, adaptation dynamics — and two
+of those rounds produced real fixes for real bugs that were not this one. What
+found it was printing `depth` next to `eye y` and noticing they disagreed. The
+project's own notes had already written the warning: *"Setting depth as an
+independent number would have let the two disagree, so that swimming downward
+changed the view without changing the water."* The band **is** that independent
+number. When a value can be set instead of derived, print it beside the thing it
+should agree with.
+
+### The bow port was a 40 cm hole, not a window
+
+The interior loft ran past the port to z = 9.5 and closed to 0.4 m, and since the
+bow is left uncapped so the helm can see out, *that pinhole was the view*. The
+acrylic ring sat a metre behind it in the dark framing nothing. A player
+photographed it: a small blown-out disc glowing in the middle of a black wall,
+which is a porthole in a ship's side, not the forward window a bow compartment
+exists for.
+
+The loft now ends at the port with a 1.95 m section, so the opening **is** the
+window — at the seated eye 1.6 m back it fills the whole frame. The exterior
+carries its skin to the same station and glazes it with a disc facing outward:
+from the water you see glass in a steel surround, and from the helm the same
+polygon is back-facing and culled, so the view out is untouched. That also closes
+a hole the previous version left — with the cabin culled from outside, an open bow
+meant looking into an empty shell.
+
 ### Added by the bug-report pass
 
 Four things a player reported in one message, and three of them were one theme:
@@ -282,7 +367,7 @@ against the drawn profile, tightest clearance +65 mm. For a question of the form
 "is this inside that", a number is a stronger answer than a frame — and it costs
 a second instead of four minutes.
 
-### Added by the piloting pass### Added by the piloting pass
+### Added by the piloting pass
 
 - **Caustics were riding on the bio floor, so they never switched off.**
   `ambientAt()` returns sunlight *plus* the constant bio/thermal glow, and the
@@ -388,7 +473,7 @@ a second instead of four minutes.
 
 ---
 
-## 7. State, and what is next
+## 7. State
 
 **Working:** the canyon (30 m at the rim to 424 m on the floor, all positional),
 physically-grounded water, caustics, marine snow, the station with walkways and
@@ -430,63 +515,6 @@ Three times the 60 fps budget with a million triangles of flora and a second
 hull in. **The flora radii do not need trimming** — that dial can stay where it
 is, and there is room for creatures.
 
-### SOLVED — the bright teal canyon floor, after three sessions
-
-The diagnostic panel answered it in one screenshot, and the answer was not in any
-shader:
-
-```
-depth 14.0 m   epipelagic   vis 21.4 m   2 atm
-mode walk   lamp 0.18   exposure 0.080   band -410 m
-sun at eye  2.0e-1  9.5e+0  1.1e+1
-eye  75 -384 13   surface -370
-```
-
-**`band -410`.** The depth band had put the sea surface at y = -370 — three
-hundred and seventy metres *below* mean sea level, and fourteen metres above a
-player standing on the canyon floor at y = -384. So the game was correctly
-rendering fourteen metres of water: full daylight, caustics on the seabed, bright
-teal, red mostly absorbed. Every measurement I took of that screenshot was right;
-the scene simply was not at the depth the geometry said.
-
-How it happened: `setDepthBand(m)` solves `band = m + cameraY - SEA_LEVEL` and was
-unclamped, so asking for 14 m while the camera sat at -384 gave -410. It was
-wired to a `?depth=` URL parameter, so a pasted link put a human's whole session
-at the wrong depth for as long as the tab stayed open — even though the
-function's own comment says "Normal play never calls this".
-
-Two fixes, and the second matters more than the first: the band is clamped at
-zero, because a surface below sea level has no meaning in a world where depth is
-derived from position; and the parameter is gated behind `auto=1` so a review
-tool cannot reach a player.
-
-**The lesson is about instruments, not about clamps.** Three review rounds chased
-this as a shader bug — caustics, exposure metering, adaptation dynamics — and two
-of those rounds produced real fixes for real bugs that were not this one. What
-found it was printing `depth` next to `eye y` and noticing they disagreed. The
-project's own notes had already written the warning: *"Setting depth as an
-independent number would have let the two disagree, so that swimming downward
-changed the view without changing the water."* The band **is** that independent
-number. When a value can be set instead of derived, print it beside the thing it
-should agree with.
-
-### The bow port was a 40 cm hole, not a window
-
-The interior loft ran past the port to z = 9.5 and closed to 0.4 m, and since the
-bow is left uncapped so the helm can see out, *that pinhole was the view*. The
-acrylic ring sat a metre behind it in the dark framing nothing. A player
-photographed it: a small blown-out disc glowing in the middle of a black wall,
-which is a porthole in a ship's side, not the forward window a bow compartment
-exists for.
-
-The loft now ends at the port with a 1.95 m section, so the opening **is** the
-window — at the seated eye 1.6 m back it fills the whole frame. The exterior
-carries its skin to the same station and glazes it with a disc facing outward:
-from the water you see glass in a steel surround, and from the helm the same
-polygon is back-facing and culled, so the view out is untouched. That also closes
-a hole the previous version left — with the cabin culled from outside, an open bow
-meant looking into an empty shell.
-
 **She is now a vessel.** `src/vessel.js` is the boat as a body: throttle, rudder,
 ballast, drag split into surge/sway/heave, bottom contact against the slope
 normal. Three decisions carry the feel and all three are cheap —
@@ -510,20 +538,37 @@ from the floor to the shelf takes roughly four minutes.
 **Helm controls:** W/S telegraph, A/D wheel, Space/C blow/flood, Shift for a
 faster telegraph, X all stop, E to stand up.
 
-**The user's standing complaints, in their order of importance:**
+## 8. What to do next, in order
 
-1. Sound. Hull creak under pressure would do more for tension than ten more panel
-   details.
-3. Creatures. Deliberately deferred: procedural organics are the hardest part.
-   Technique is known — sine along the spine in the vertex shader, Verlet chains
-   for tentacles, radial pulse for jellyfish. The scariest creature is the slowest,
-   which is also the cheapest to animate.
+Nothing here is blocked and nothing is half-finished. Pick from the top.
 
-**Known weak spots in what was just added,** so the next session does not have to
-rediscover them: the mess table and galley counter still read as plain boxes at
-two metres and want the same edge treatment the lockers got; the interior is
-lit toward the top of its value range and could stand more darkness between the
-lamps; and the turf is only just legible at the shelf camera's height.
+1. **Sound.** Hull creak under pressure, the pump note changing with the
+   telegraph, the ballast blow. This would do more for tension than another
+   hundred panel details, and the vessel already publishes every value a sound
+   layer needs: depth, pressure, throttle, ballast, `vessel.contact` on grounding.
+2. **Creatures.** Deliberately deferred until now because procedural organics are
+   the hardest thing in the project, and there is finally headroom for them —
+   183 fps leaves room. Technique is known and written down: a sine along the
+   spine in the vertex shader, Verlet chains for tentacles, a radial pulse for
+   jellyfish. The scariest creature is the slowest, which is also the cheapest to
+   animate.
+3. **A reason to go down.** She can be driven, the depth zones exist and the
+   pressure model is real, but nothing asks the player to use any of it. This is
+   a design gap, not a rendering one, and it is the largest thing standing
+   between "impressive" and "a game".
+4. **Interior polish, the known weak spots.** The mess table and the galley
+   counter still read as plain boxes at two metres and want the edge treatment
+   the lockers got. The cabin is lit toward the top of its value range and could
+   stand more darkness between the lamps.
+
+### Open, small, and honestly not urgent
+
+- **Boulders have no collision.** There are 500-plus instances and the terrain
+  underneath them already blocks, so swimming through one is possible but rarely
+  noticed. If it becomes annoying, the pattern is in `station.blockers`.
+- **The turf is only just legible** at the shelf camera's height.
+- **`g.outside()` leaves `game.mode` alone,** so the diagnostic panel reports
+  `mode walk` while the review camera is outside the boat. Harness-only cosmetic.
 
 **How this user gives feedback, and it is good feedback:** blunt, specific, and
 usually right. They play the build and report what broke. Take the complaint
