@@ -1126,12 +1126,36 @@ function frame() {
     document.getElementById('hHull').textContent = Math.round(game.pressure);
     document.getElementById('hSpeed').textContent = pilot.speed.toFixed(1);
   }
+  /* The diagnostic panel, and it exists because asking a player to read internals
+   * is the wrong way round.
+   *
+   * Two questions have been open for three sessions and neither can be answered
+   * from this side: what the real frame rate is on hardware that has a GPU, and
+   * why one player's canyon floor rendered as a bright teal lagoon when the same
+   * place measures 19,28,35 here. Both are single numbers. Rather than talk
+   * someone through a browser console, put every number that could possibly
+   * matter on one key and ask for a screenshot — an instrument beats an
+   * interview. F3, and the layout is grouped so a photograph of it is readable.
+   *
+   * `exposure` and `sun` are the two that matter for the bright-water report:
+   * exposure says whether the meter opened up, and sun says whether any daylight
+   * is reaching the camera at all. If exposure is normal and sun is zero, the
+   * brightness is coming from somewhere neither of us has thought of yet. */
   const st = document.getElementById('stats');
   if (!st.hidden) {
-    st.textContent = `${game.fps.toFixed(0)} fps  ${W}x${H}\n`
-      + `${curPose}  ${Math.round(game.depth)} m  ${game.zone}\n`
-      + `vis ${env.visibility.toFixed(1)} m  ${game.pressure.toFixed(0)} atm\n`
-      + `${pilot.speed.toFixed(2)} m/s  band ${Math.round(pilot.band)} m`;
+    const m = game.meters();
+    const p = camera.position;
+    st.textContent = [
+      `${game.fps.toFixed(0)} fps   ${W}x${H}   draws ${renderer.info.render.calls}   tris ${(renderer.info.render.triangles / 1000).toFixed(0)}k`,
+      `depth ${game.depth.toFixed(1)} m   ${game.zone}   vis ${env.visibility.toFixed(1)} m   ${game.pressure.toFixed(0)} atm`,
+      `mode ${game.mode}   lamp ${game.lampOn.toFixed(2)}   exposure ${post.exposure.toFixed(3)}   band ${pilot.band.toFixed(0)} m`,
+      `sun at eye  ${m.sunAtCam.map((v) => v.toExponential(1)).join('  ')}`,
+      `eye  ${p.x.toFixed(0)} ${p.y.toFixed(0)} ${p.z.toFixed(0)}   surface ${env.surfaceY.toFixed(0)}`,
+      `boat ${vessel.pos.x.toFixed(0)} ${vessel.pos.y.toFixed(0)} ${vessel.pos.z.toFixed(0)}`
+        + `   hdg ${vessel.heading.toFixed(0)}   way ${vessel.way.toFixed(2)} m/s`,
+      `throttle ${vessel.throttle.toFixed(2)}   ballast ${vessel.ballast.toFixed(2)}`
+        + `   ${vessel.grounded ? 'AGROUND' : 'clear'}`,
+    ].join('\n');
   }
 }
 
@@ -1144,6 +1168,14 @@ function begin() {
     if (e.code === 'KeyH') {
       const l = document.getElementById('legend');
       l.hidden = !l.hidden;
+    }
+    /* F3 for the diagnostic panel. Chosen because every game uses it for exactly
+     * this, so it needs no explaining, and because it is not a movement key —
+     * a diagnostic bound to a letter gets pressed by accident while swimming. */
+    if (e.code === 'F3') {
+      e.preventDefault();
+      const d = document.getElementById('stats');
+      d.hidden = !d.hidden;
     }
   });
   if (qStr('stats', '0') === '1') document.getElementById('stats').hidden = false;
