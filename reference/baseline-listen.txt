@@ -1,0 +1,22 @@
+# Baseline audio-graph check:  node tools/listen.mjs --mode graph
+
+
+  start() -> built   state running
+  nodes created: destination 1, buffer 3, gain 20, compressor 1, biquad 10, convolver 2, bufferSource 5, periodicWave 1, osc 5
+  silence  -> sound running  lvl 0.051  voices 0  creak/s 0.04  rpm 380  blade 32Hz  in 1.00  score 0.011 tens 0.09 duck 1.00
+  descent  -> sound running  lvl 0.061  voices 0  creak/s 3.04  rpm 380  blade 32Hz  in 1.00  score 0.004 tens 0.28 duck 1.00
+  plant    -> sound running  lvl 0.275  voices 0  creak/s 0.07  rpm 1220  blade 102Hz  in 1.00  score 0.016 tens 0.38 duck 1.00
+  blow     -> sound running  lvl 0.356  voices 0  creak/s 0.06  rpm 560  blade 47Hz  in 1.00  score 0.018 tens 0.46 duck 1.00
+  water    -> sound running  lvl 0.065  voices 0  creak/s 0.04  rpm 755  blade 63Hz  in 0.00  score 0.010 tens 0.58 duck 0.52
+  beacon   -> sound running  lvl 0.057  voices 0  creak/s 0.04  rpm 460  blade 38Hz  in 0.00  score 0.019 tens 0.55 duck 0.99
+  1440 frames, 928 events fired, 0 voices still open
+
+  no NaNs, no illegal ramps, no reads past a buffer end
+
+  ------------------------------------------------------------------
+  THIS WAS STRUCTURAL ONLY. It proves the graph builds and that the
+  numbers going into it are finite. It does NOT establish that
+  anything is audible, that the balance is right, or that the mix
+  does not clip: no samples were rendered. For that, install
+  Playwright and run --mode render.
+  ------------------------------------------------------------------

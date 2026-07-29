@@ -212,6 +212,20 @@ detailed. Where geometry stops and shading starts is arithmetic: at 62° over
 1.5 cm, model it; below, put it in a height field; either way fade the fine
 bands with distance or they alias into crawling static.
 
+## Continuing this on another machine
+
+Nothing lives outside the repository. Clone it, then:
+
+```
+python3 -m http.server 8123
+node tools/dyn.mjs                    # needs nothing installed
+node tools/listen.mjs --mode graph    # ditto
+```
+
+Diff those against `reference/baseline-*.txt`. `HANDOFF.md` section 1b is the full
+bootstrap, including which environment facts are specific to the sandbox this was
+built in and should be re-tested rather than believed.
+
 Run it: serve the directory and open `index.html`. There is no build.
 
 ```

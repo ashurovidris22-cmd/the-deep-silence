@@ -41,6 +41,106 @@ survive into a new session:
 
 ---
 
+## 1b. Moving to another machine, or another service
+
+**Nothing lives in the chat. The repository is the handoff.** This file, the
+README, and the commit bodies (7-10 KB each, deliberately) are the whole record.
+Clone it and you have everything; there is no context to carry over.
+
+### First five minutes, on any machine
+
+```
+git clone https://github.com/ashurovidris22-cmd/the-deep-silence
+cd the-deep-silence
+python3 -m http.server 8123 &          # the site has no build step
+
+node tools/dyn.mjs                      # arithmetic. No browser, no network.
+node tools/listen.mjs --mode graph      # the audio graph, structurally
+```
+
+Those two need **nothing installed** — `tools/vendorlink.mjs` points the bare
+`three` specifier at `vendor/` by itself. Diff their output against
+`reference/baseline-dyn.txt` and `reference/baseline-listen.txt`; those files are
+committed for exactly this reason. Everything should say:
+
+```
+helm agrees with the view, and the compass counts up to starboard
+verdict                   AGREES with the stated intent
+the loop closes both ways: blackout, and a swap you have to wait for
+margin 6.5 dB   ok, a creak still lands
+all voices released
+no NaNs, no illegal ramps, no reads past a buffer end
+```
+
+For frames and for rendered audio you need a browser:
+
+```
+npm i playwright && npx playwright install chromium
+node tools/survey.mjs --w 800 --h 450
+node tools/sheet.mjs shots/[a-t]-*.png --out shots/_sheet-world.png
+node tools/listen.mjs --mode render --scene blow
+```
+
+**`reference/baseline-frames.txt` is the frame baseline, and it is numbers rather
+than pictures on purpose.** `shots/` is gitignored, so for two sessions nothing a
+survey produced could be compared against anything. A committed image would fix
+half of that; per-frame statistics fix the useful half — an image tells you
+something changed, a table tells you *what*. Mean, median, peak, blown percentage,
+black percentage and per-channel means for all 33 frames. Regenerate it with:
+
+```
+python3 - <<'EOF'
+from PIL import Image
+import numpy as np, glob, os
+for f in sorted(glob.glob('shots/*.png')):
+    n = os.path.basename(f)[:-4]
+    if n.startswith('_'): continue
+    a = np.asarray(Image.open(f).convert('RGB')).astype(float); s = a.sum(axis=2)
+    print(f"  {n:<12} {s.mean():7.1f} {np.median(s):7.1f} {s.max():5.0f}"
+          f" {100*(s>700).mean():7.2f} {100*(s<30).mean():7.2f}"
+          f" {a[...,0].mean():6.1f} {a[...,1].mean():6.1f} {a[...,2].mean():6.1f}")
+EOF
+```
+
+The two contact sheets themselves are not committed: `github__push_files` sends
+file content as a string, which corrupts binaries, and there was no `git push`
+credential in this sandbox to do it properly. **On a machine with a normal git
+remote, commit the sheets** — a human still reads a picture faster than a table.
+
+### What is specific to the sandbox this was built in, and is probably not true elsewhere
+
+Do not carry these over as facts; re-test them.
+
+- **npm was blocked** (`403` from a network filter) in two consecutive sessions.
+  On a normal machine `npm i playwright` just works, and then `tools/cdp.mjs`
+  stands down on its own — `ensurePlaywright()` checks for a real install and
+  leaves it alone. The shim is a fallback, not a preference.
+- **`CHROME_PATH=/tmp/cr/chrome-linux/chrome`** was needed only because the
+  browser had to be fetched by hand from the Playwright CDN. With a real
+  Playwright install, ignore it.
+- **Pushing went through a GitHub integration** with `paramsFile`, because there
+  was no credential for `git push`. Anywhere else, just push.
+- **No GPU.** Rendering was SwiftShader at roughly half a frame per second, which
+  is why section 4 is full of warnings about frames that cannot settle. On real
+  hardware most of those cautions evaporate — and the two open visual questions
+  (the strobe, the lamp's blown pool) become answerable in seconds.
+
+### Paste this as the first message to a fresh agent
+
+> Continue this project. All state is in the repo:
+> https://github.com/ashurovidris22-cmd/the-deep-silence
+> Read HANDOFF.md in full, then README.md, then `git log` — the commit bodies are
+> the reasoning record and are long on purpose.
+> Section 1b is the bootstrap: run `node tools/dyn.mjs` and
+> `node tools/listen.mjs --mode graph` first and diff them against `reference/`.
+> Section 4 is the harness and the traps in it; section 8 is what to do next, in
+> order. Note that sections marked as sandbox-specific may not apply to you —
+> re-test rather than assume.
+> Two things have never been judged by a human: whether the sound is right, and
+> whether the trunk strobe reads as a light. Both are at the top of section 8.
+
+---
+
 ## 2. Where things live
 
 - **Repo:** `github.com/ashurovidris22-cmd/the-deep-silence`
