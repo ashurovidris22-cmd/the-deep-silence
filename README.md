@@ -63,6 +63,7 @@ src/fitout.js       everything inside the hull
 src/vessel.js       the boat as a body: throttle, rudder, ballast, bottom contact
 src/post.js         HDR pipeline: volumetric, bloom, ACES, grain
 tools/              the review harness (see below)
+reference/          committed baselines: harness output and per-frame numbers
 vendor/             three.js, vendored — no build step, no CDN at runtime
 ```
 
@@ -337,6 +338,14 @@ Kept because each one cost real time and each will recur.
   opens straight back up, and the drone itself is still near the top of its range
   because it falls with a 22 s constant. Two envelopes with different time
   constants overlap worst during the decay.
+
+## Where the design thinking lives
+
+`HANDOFF.md` is what has been decided and measured. `DESIGN-CREATURES.md` is a
+design conversation that has not been built yet — how to make the inhabitants
+frightening and alive, why the Strouhal number is the animation constant, and why
+an animal longer than 26 m can never be seen whole in this water. Kept separate on
+purpose: one file is fact, the other is argument.
 
 ## Licence
 

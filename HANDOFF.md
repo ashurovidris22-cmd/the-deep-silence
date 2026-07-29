@@ -955,6 +955,33 @@ Loudness budget, measured rather than intended: the floor at rest sits at 0.040
 against a grounding at 0.55, which is 15 dB under the quietest creak. **A sound is
 only frightening against silence**, so that table in `acoustics.js` is a gate.
 
+### What the renderer does not do, and it is measured
+
+Recorded because the art direction in section 1 asks for things that are simply
+absent, and a reader could otherwise assume they are present and subtle.
+
+- **There are no shadows. Not one shadow map anywhere in `src/`.** Section 1 says
+  "few light sources, heavy bloom, visible volumetric cones, everything else in
+  shadow" — the last clause is not implemented. Nothing occludes light; the scene
+  holds together on extinction and fog alone.
+- **No temporal filter.** `post.js` says so in its own comment, and pays for it:
+  it uses white noise rather than interleaved gradient noise specifically because
+  there is nothing to average the structure away. Measured, the grain is +-80 on a
+  channel sum per frame, which is enough to swamp a small light in an A/B
+  comparison (see section 4).
+- **3400 marine snow particles.** Modest for something the art direction calls
+  "always in frame".
+- **Two post passes** — volumetric, then a composite that carries DOF, bloom, ACES
+  and grain. No AO, no reflections.
+- **Headroom: 3 to 4x.** 183 fps in the machinery space and 240 swimming, at
+  2560x1347 with 1.7M triangles. All of the above is affordable in WebGL2; none of
+  it needs WebGPU.
+
+**The largest visual return available is a single shadow-casting projector on the
+lamp.** The reference frame this whole project is built around is a catwalk lit by
+two lamps in near-blackness, and a catwalk that casts no shadow is the one thing in
+that frame that cannot be right.
+
 ## 8. What to do next, in order
 
 1. **Judge the sound and the frames with a human.** Both have now been *measured*
@@ -979,13 +1006,29 @@ only frightening against silence**, so that table in `acoustics.js` is a gate.
    anyway, and the wrist unit's bearing arrow is what actually prevents getting
    lost. The arrow is verified working: bearing 042°, range 45 m, checked against
    the geometry by hand.
-3. **Creatures.** Procedural organics are the hardest thing in the project and
-   there is finally headroom — 183 fps leaves room. Technique is known and written
-   down: a sine along the spine in the vertex shader, Verlet chains for tentacles,
-   a radial pulse for jellyfish. The scariest creature is the slowest, which is
-   also the cheapest to animate. **They now have a soundscape to arrive into**,
-   and a creature you hear before you see is a different animal.
-4. **A reason to go *down*.** Half of this closed: leaving the hull now has a
+4. **Shadows.** One shadow-casting projector on the lamp. Largest visual return
+   available, affordable four times over — see the end of section 7 for the
+   measurements. Everything else on that list (a temporal filter, more marine snow,
+   contact shadows) is cheaper and worth less.
+5. **Creatures — read `DESIGN-CREATURES.md` before starting.** That file is a
+   design conversation rather than a decision, but its arithmetic is checked and it
+   changes the order of the work. Four things to know first:
+   - the **Strouhal number** derives tailbeat frequency from swimming speed
+     (`f = St·U/A`, St ≈ 0.3) the way Jerlov derives the palette from the water, so
+     the animation constant already exists and does not need tuning
+   - **bioluminescence carries about 38 m against 26 m of Duntley visibility**, so
+     a creature should arrive as a *light* and resolve into a body only on approach
+   - **an animal longer than 26 m can never be seen whole** — optics doing the
+     monster design, not restraint
+   - the cheapest frightening idea in the file is an **acoustic mimic** of the
+     trunk pinger: two changed numbers in `audio.js`, no model, no texture, and it
+     turns the player's own way home against them
+
+   The technique is otherwise as previously noted: undulation in the vertex shader,
+   Verlet chains for anything trailing, a radial pulse for bells. The scariest
+   creature is the slowest, which is also the cheapest to animate — and **they now
+   have a soundscape to arrive into**, so sound can come before sight.
+6. **A reason to go *down*.** Half of this closed: leaving the hull now has a
    clock on it and a way home, so an excursion is a decision. But that is a reason
    to come *back*, and the descent itself still asks for nothing — she can be
    driven, the zones exist, the pressure model is real and now audible, and no
@@ -994,7 +1037,7 @@ only frightening against silence**, so that table in `acoustics.js` is a gate.
    The excursion loop is the obvious hook to hang it on: something down there that
    has to be reached on foot, far enough from the boat that fifteen minutes of
    sorbent is a real budget.
-5. **Interior polish, the known weak spots.** The mess table and the galley
+7. **Interior polish, the known weak spots.** The mess table and the galley
    counter still read as plain boxes at two metres and want the edge treatment
    the lockers got. The cabin is lit toward the top of its value range and could
    stand more darkness between the lamps.
