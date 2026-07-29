@@ -127,17 +127,52 @@ Do not carry these over as facts; re-test them.
 
 ### Paste this as the first message to a fresh agent
 
-> Continue this project. All state is in the repo:
-> https://github.com/ashurovidris22-cmd/the-deep-silence
-> Read HANDOFF.md in full, then README.md, then `git log` — the commit bodies are
-> the reasoning record and are long on purpose.
-> Section 1b is the bootstrap: run `node tools/dyn.mjs` and
-> `node tools/listen.mjs --mode graph` first and diff them against `reference/`.
-> Section 4 is the harness and the traps in it; section 8 is what to do next, in
-> order. Note that sections marked as sandbox-specific may not apply to you —
-> re-test rather than assume.
-> Two things have never been judged by a human: whether the sound is right, and
-> whether the trunk strobe reads as a light. Both are at the top of section 8.
+> Continue this project. Everything is in the repository — there is no chat history
+> to carry over:
+> **https://github.com/ashurovidris22-cmd/the-deep-silence**
+>
+> Read in this order: `HANDOFF.md` in full, then `README.md`, then `git log` with
+> full bodies — the commit messages are 7-10 KB each and are the reasoning record,
+> not a changelog. `DESIGN-CREATURES.md` is a design conversation that has not been
+> built; read it before touching creatures.
+>
+> **Before changing anything, prove the build is healthy.** Two commands, no
+> install, no network, no browser:
+> `node tools/dyn.mjs` and `node tools/listen.mjs --mode graph`. Diff both against
+> `reference/`. Six lines are the gate — the helm agreeing with the view, the
+> ballast tank at 8 s, the excursion loop closing, a 6.5 dB creak margin, all
+> voices released, no NaNs.
+>
+> **Section 1b lists what was specific to the previous sandbox** (npm blocked, a
+> hand-fetched Chromium, no GPU). Re-test those rather than believing them; most of
+> the cautions in section 4 about frames that cannot settle disappear on real
+> hardware. Section 8 is what to do next, in order.
+>
+> **The method matters more than the state, and it is why this project is what it
+> is.** Inherit it:
+> - **Arithmetic beats screenshots.** Anything with a time constant or a clearance
+>   in it gets measured in node at a fixed 60 Hz — `tools/dyn.mjs` exists for that
+>   and has caught bugs no frame would have shown. Sound especially: it is nothing
+>   but time constants.
+> - **Measure before arguing.** Three separate bugs here were found by bisecting
+>   with `g.setLayer` after reasoning had blamed the wrong subsystem twice each.
+> - **Derive, do not choose.** The palette comes from Jerlov, the ballast hiss from
+>   Minnaert, the hull's notes from plate modes. If a number is a judgement call,
+>   label it as one and put it with the others.
+> - **One owner per fact.** A formula written out twice will disagree with itself;
+>   several bugs here were exactly that.
+> - **Write the commit body.** Long. Why, what was tried, what the numbers were.
+>   That is the handoff.
+>
+> **Two things have never been judged by a human**: whether the sound is right, and
+> whether the trunk strobe reads as a light. Both are at the top of section 8, and
+> both need a GPU and headphones rather than more code.
+>
+> The owner writes in Russian and the repository is in English — that has worked
+> fine for every session so far. Their feedback is blunt, specific and usually
+> right: take the complaint literally, find the measurable cause, fix the cause
+> rather than the symptom, and say plainly when something is a genuine gap rather
+> than a bug.
 
 ---
 
