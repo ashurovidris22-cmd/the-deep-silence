@@ -72,6 +72,18 @@ These cost real time to discover. Do not re-derive them.
   Ask for `registry.npmjs.org` *and* `cdn.playwright.dev` (the browser binary
   comes from the second, not the first) at the start of a session that needs
   frames, and do not assume it will be granted.
+- **The harness no longer needs npm at all.** On the session that discovered this,
+  `cdn.playwright.dev` was granted and `registry.npmjs.org` was not — a browser and
+  no way to drive it. Both halves are now solved locally:
+  - the browser downloads from `https://playwright.azureedge.net/builds/chromium/1181/chromium-linux.zip`,
+    which 307-redirects to `playwright.download.prss.microsoft.com`. Unzip it and
+    export `CHROME_PATH=/tmp/cr/chrome-linux/chrome`.
+  - `tools/cdp.mjs` is a dependency-free DevTools client — node 22+ ships a global
+    `WebSocket`, and the whole surface `tools/` uses is fifteen methods.
+    `vendorlink.ensurePlaywright()` points the bare specifier `playwright` at it,
+    and `boot.mjs` calls that before importing. **If a real Playwright is
+    installed it wins**; the shim is only a fallback and is marked by its version
+    string `0.0.0-cdp-shim`.
 - **`node tools/vendorlink.mjs` removes that dependency for node tests.** Three.js
   is **vendored** into `vendor/` so the site has no build step and no runtime CDN
   dependency — and `vendor/three.module.js` imports cleanly under node, so the
@@ -126,6 +138,34 @@ were innocent. `tools/shot.mjs` exists to bisect exactly that.
 
 Under software rendering a frame takes 10–30 s. Use `?vsteps=12&vscale=0.4` while
 iterating; take quality verdicts at full settings.
+
+**The sandbox cannot settle a frame, and this invalidates naive A/B comparison.**
+Four rounds of bisection were spent on a beacon that turned out to be measuring
+neither the beacon nor anything else:
+
+- **Auto-exposure adapts over three *simulated* seconds.** Software rendering runs
+  at roughly half a frame a second with `dt` clamped to 0.1, so a settled exposure
+  is thirty frames and about five minutes away. Two captures taken a few frames
+  apart differ by their adaptation state, and that difference is *larger* than a
+  small light's contribution. Measured drift between two captures of the same
+  pose: exposure 2.161 to 3.266.
+- **`settle` is in milliseconds and may contain zero frames.** Two reads two
+  seconds apart returned byte-identical state because no frame had run between
+  them, which read as "the value is frozen" and sent the search into the wrong
+  subsystem entirely. **Wait on `g.frames`, not on the clock.**
+- **The grain pass gives ±80 on a channel sum, per frame.** Any pixel diff below
+  that is noise. An early "the beacon washes the whole frame, 443k pixels differ"
+  was entirely this.
+
+So: pixel-diff two captures only for *large* differences, wait on frame counts,
+and prefer reading numbers out of the page over comparing images.
+
+**An unnamed object cannot be found by an instrument.** A probe went looking for
+the trunk strobe by shape — "the Points group with one vertex" — and found
+something else, then reported for four rounds that the strobe was frozen and
+invisible. `boatBeacon` and `boatBeaconPoints` are named now, and the strobe is in
+`g.setLayer` as `boatbeacon`, because a light you cannot switch off cannot be
+cleared as a suspect in an exposure question.
 
 **In-game instruments, because the sandbox cannot see everything:**
 
@@ -407,6 +447,50 @@ Verified as arithmetic rather than as a screenshot: all 27 placements checked
 against the drawn profile, tightest clearance +65 mm. For a question of the form
 "is this inside that", a number is a stronger answer than a frame — and it costs
 a second instead of four minutes.
+
+### Added by the first session that could actually look and listen
+
+Two sessions of work had shipped unheard and unphotographed. Running the
+instruments found six things, and three of them were in the instruments.
+
+- **`resume()` on an `OfflineAudioContext` throws.** It reports `state ===
+  'suspended'` until `startRendering`, so the live-context recovery path — which
+  retries a suspended context once a second — filled the console with
+  `InvalidStateError` on the very first render. `typeof ctx.startRendering` is the
+  discriminator the API gives you.
+- **`listen.mjs` silently rendered a different scene than the one asked for.** The
+  in-page scene table was a *copy* of the node one; a scene added to one and not
+  the other fell through `scenes[name] || scenes.descent` and printed the
+  requested name over another scene's numbers. Ten minutes were spent reading a
+  spectrum that belonged to `descent`. The tool now has one table, sampled in node
+  and passed in, and it exits on an unknown name. **This is the exact failure
+  `boot.mjs`'s own header warns about, reproduced inside the harness.**
+- **"Energy by octave" was one 0.25 Hz bin.** For a drone that is fine; for
+  broadband noise it is a single sample of a random variable, and it reported
+  500 Hz thirty decibels above its neighbours. Nine probes a semitone apart,
+  averaged in power, per band.
+- **A band average under-reads a transient by its duty cycle.** The 3.1 kHz pinger
+  sat 40 dB down and looked filtered out; it is a 0.13 s ping every two seconds,
+  which is six per cent, or -12 dB before anything else. Isolating it in its own
+  scene showed it healthy. The `EAR.waterTilt` change from 1700 to 4500 Hz stands
+  on the physics — underwater hearing loss is broadband, not a roll-off — but the
+  evidence that prompted it was a misread.
+- **An amber lamp is a green lamp.** Measured: the emitted (1.00, 0.42, 0.16)
+  arrives at 11.3 m as (0.095, 0.459, 0.135), because red is attenuated five times
+  harder. Amber had been chosen precisely so the trunk strobe could not be mistaken
+  for bioluminescence, and the water undoes that. **No colour fixes it** — beyond a
+  few metres this water passes only green. The distinction has to be carried by
+  rhythm: two quick pulses and a gap, which nothing living does.
+- **`minutesLeft` could read negative.** `co2` overshoots capacity inside the tick
+  that spends the last of it, and a frame caught the wrist unit reading
+  "0% · -2.4 MIN" — an instrument that goes negative at the moment the player most
+  needs to trust it. Clamped.
+
+**Cleared, not fixed:** the blown white pool under the lamp in most survey frames
+is *not* from this pass. Bisected with the new layer toggle — 4982 blown pixels
+with the strobe on, 4983 with it off, and `draws` 30 against 29 confirming the
+toggle bit. It is the pre-existing look of the lamp, and whether it is too hot is
+an art call rather than a defect.
 
 ### Added by the steering and excursion pass
 
@@ -773,25 +857,28 @@ only frightening against silence**, so that table in `acoustics.js` is a gate.
 
 ## 8. What to do next, in order
 
-1. **Listen to it, and look at it.** Two sessions of work have now shipped without
-   a browser, because `registry.npmjs.org` answered 403 both times. Everything
-   with a time constant is verified by `tools/dyn.mjs` and the audio graph is
-   verified structurally by `listen.mjs --mode graph` — **and not one sample has
-   been rendered, nor one frame photographed.** The second pass is the riskier of
-   the two, because it added things that can only be judged by eye: the amber
-   strobe on the trunk, the wrist unit's bearing arrow, the hypercapnia vignette
-   and the blackout fade. First job of the next session with network:
-   `npm i playwright && npx playwright install chromium`, then
-   `node tools/listen.mjs --mode render --scene descent` (and `plant`, `blow`,
-   `silence`, `water`), then `node tools/survey.mjs --w 800 --h 450` and the
-   contact sheet, then put headphones on. Expect the balance and the overlay
-   opacities to need work — the numbers being right is not the same as it looking
-   or sounding right.
-2. **Judge the score with a human ear, and be willing to delete it.** It is capped
-   at 0.028 against a bed of 0.040 and it passes the 6 dB creak gate, but "does it
-   damage the silence" is not a question arithmetic can close. If it does, the
-   honest fix is to remove it, not to tune it — the rest of the sound layer was
-   designed around the silence being real.
+1. **Judge the sound and the frames with a human.** Both have now been *measured*
+   — `tools/listen.mjs --mode render` across six scenes and a 33-frame survey with
+   contact sheets — and the numbers are healthy: no clipping anywhere, the pump's
+   62.5 and 125 Hz peaks are the 100 Hz mains hum and the 121 Hz blade note, the
+   ballast blow peaks at 8 kHz exactly as the Minnaert scaling predicts, and the
+   interior frames still draw 31 calls and 1743k triangles. What no measurement can
+   settle is whether it *sounds* and *looks* right. Put headphones on, and look at
+   `shots/_sheet-world.png` and `shots/_sheet-boat.png`.
+2. **Decide about the lamp's blown pool.** In most exterior frames the seabed under
+   the lamp is pure white over about 1.4% of the frame with 6% near-white. It
+   predates this work and it may be the intended "heavy bloom, few light sources"
+   look — but seen twenty frames at a time it is the most repeated feature in the
+   set, which is exactly the signal the contact sheet exists to give.
+3. **The trunk strobe is unproven.** It is positioned, named, toggleable and its
+   colour attribute is driven correctly (k = 0.12 dark, 15.12 at full flash, 26.7 px
+   at 12 m, and the GL point-size limit is 1023 so it is not being clamped). Whether
+   it reads as a light on screen could not be established here, because exposure
+   adaptation and grain both swamp it — see section 4. **Judge it on hardware, and
+   be ready to delete it**: at 21 m visibility a light cannot be the long-range cue
+   anyway, and the wrist unit's bearing arrow is what actually prevents getting
+   lost. The arrow is verified working: bearing 042°, range 45 m, checked against
+   the geometry by hand.
 3. **Creatures.** Procedural organics are the hardest thing in the project and
    there is finally headroom — 183 fps leaves room. Technique is known and written
    down: a sine along the spine in the vertex shader, Verlet chains for tentacles,

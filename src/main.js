@@ -556,11 +556,18 @@ scene.add(beacons);
  * The light marks the *trunk*, not the middle of the hull, because what a lost
  * swimmer needs is not the boat but the way in.
  *
- * Amber, and that is an art-direction decision rather than a taste one: green is
- * reserved for bioluminescence, the only saturated colour this game permits, and
- * a green light on the boat would read as something alive. The reference frame
- * that carries the whole mood is a catwalk with two red lamps in near-blackness,
- * so man-made light here is warm.
+ * Amber was chosen so it could not be mistaken for bioluminescence, which is the
+ * only saturated colour this art direction permits and which means *alive*. The
+ * measurement says that does not survive the water, and the number is worth
+ * keeping: at 11.3 m the emitted (1.00, 0.42, 0.16) arrives as
+ * (0.095, 0.459, 0.135). Red is attenuated five times harder than green, so an
+ * amber lamp at any useful range **is** a green lamp.
+ *
+ * There is no colour that fixes this — beyond a few metres the water only passes
+ * green, which is the same absorption curve the whole palette is built on. So the
+ * distinction has to be carried by *rhythm* rather than by hue: two quick pulses
+ * and a gap, which nothing living does. Colour cannot mean anything at distance
+ * down here; behaviour can.
  *
  * Built as its own one-point group rather than parented to the hull, because the
  * beacon shader takes `position` as world space — it multiplies by `viewMatrix`
@@ -569,6 +576,14 @@ scene.add(beacons);
  * Writing three floats into the attribute each frame is cheaper than either
  * fixing that or having two shaders. */
 const boatBeacon = buildBeacons(env, [{ pos: [0, 0, 0], col: [1, 1, 1], size: 0.42 }]);
+/* Named, because an unnamed object cannot be found by an instrument.
+ *
+ * A review probe went looking for this by shape — "the Points group with exactly
+ * one vertex" — and found one of the station's lamp groups instead, then reported
+ * for four rounds that the strobe was frozen and invisible. It was measuring
+ * something else entirely. `g.setLayer` works by name for the same reason. */
+boatBeacon.name = 'boatBeacon';
+boatBeacon.children[0].name = 'boatBeaconPoints';
 boatBeacon.frustumCulled = false;
 scene.add(boatBeacon);
 env.register(boatBeacon.userData.mat);
@@ -579,7 +594,16 @@ const _exoT = new THREE.Vector3(), _exoD = new THREE.Vector3();
 const _exoF = new THREE.Vector3(), _exoR = new THREE.Vector3();
 /* Once every 2.4 s, and short. A steady lamp at this range is a dim smudge that
  * the eye stops seeing; a flash is found by peripheral vision, which is the whole
- * reason navigation lights flash. */
+ * reason navigation lights flash.
+ *
+ * Worth knowing before trying to review this: the sandbox cannot settle a frame
+ * well enough to judge it. Auto-exposure adapts over three *simulated* seconds,
+ * software rendering runs at about half a frame a second with `dt` clamped to
+ * 0.1, so a settled exposure is thirty frames and five minutes away — and its
+ * drift between two captures is larger than this beacon's contribution. Four
+ * rounds of bisection were spent on differences that turned out to be exposure
+ * adaptation and per-frame grain. Judge the strobe on hardware. */
+let beaconHold = null;
 function updateBoatBeacon(t) {
   vessel.toWorld(BEACON_LOCAL, _beaconW);
   const pa = boatBeacon.children[0].geometry.attributes;
@@ -588,7 +612,13 @@ function updateBoatBeacon(t) {
   // Two quick pulses then a gap, so it cannot be mistaken for the station's
   // steady hazard lamps.
   const ph = (t % 2.4) / 2.4;
-  const flash = Math.exp(-Math.pow((ph - 0.02) / 0.035, 2))
+  /* A flash with a 3% duty cycle cannot be photographed by a harness whose frame
+   * takes twenty seconds under software rendering: every review shot would catch
+   * the dark part and report that the beacon does not exist. `g.beacon(1)` pins
+   * it. Same argument as `g.dbg` and the layer toggles — an instrument, not a
+   * convenience. */
+  const flash = beaconHold !== null ? beaconHold
+    : Math.exp(-Math.pow((ph - 0.02) / 0.035, 2))
     + 0.75 * Math.exp(-Math.pow((ph - 0.13) / 0.035, 2));
   const k = 0.12 + 15.0 * flash;
   pa.aCol.setXYZ(0, 1.00 * k, 0.42 * k, 0.16 * k);
@@ -950,6 +980,12 @@ const game = {
    * at sound from a sandbox that has no sound card. */
   audio: () => audio,
   sound: (on) => (on ? audio.start() : audio.mute(true)),
+  /* Pin the strobe for a still. Pass null to hand it back to the clock. */
+  beacon: (v = 1) => { beaconHold = v; },
+  /* Life support, so a review can photograph states that take a quarter of an
+   * hour to reach honestly. Setting `co2` drives the *real* model rather than the
+   * overlay, so the vignette a frame shows is the one a player would get. */
+  life: () => life,
   pose: (n) => { applyPose(n); },
   /* Put the camera at a named station inside the boat.
    *
@@ -996,7 +1032,10 @@ const game = {
   visibility: () => env.visibility,
   setLayer: (name, on) => {
     const o = { kelp, rocks, snow, terrain, beacons, turf, pens, sponges, whips,
-      station: station.mesh, sub: sub.mesh, boat: boat.mesh, hull: ext.mesh }[name];
+      station: station.mesh, sub: sub.mesh, boat: boat.mesh, hull: ext.mesh,
+      // The trunk strobe. A new light in the scene is a suspect in any exposure
+      // question, and a suspect you cannot switch off cannot be cleared.
+      boatbeacon: boatBeacon }[name];
     if (o) o.visible = on;
     /* "hud" means every scrap of interface, not just the readout.
      *

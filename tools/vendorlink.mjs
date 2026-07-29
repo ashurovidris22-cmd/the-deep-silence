@@ -50,7 +50,44 @@ export function ensureThree(verbose = false) {
   return true;
 }
 
+const PW_PKG = JSON.stringify({
+  name: 'playwright',
+  version: '0.0.0-cdp-shim',
+  type: 'module',
+  main: 'index.mjs',
+  exports: { '.': './index.mjs' },
+}, null, 2) + '\n';
+
+const PW_INDEX = "export * from '../../tools/cdp.mjs';\nexport { default } from '../../tools/cdp.mjs';\n";
+
+/**
+ * Point the bare specifier `playwright` at the local CDP shim.
+ *
+ * Only when there is no real Playwright installed — a genuine one is strictly
+ * better and must win. The marker is the version string, so an installed
+ * package is never overwritten and the shim is never mistaken for one.
+ *
+ * This exists because the registry has now been unavailable in two consecutive
+ * sessions while the browser CDN was reachable in one of them. A browser and no
+ * driver is a bad place to be for the sake of fifteen methods.
+ */
+export function ensurePlaywright(verbose = false) {
+  const dir = join(ROOT, 'node_modules', 'playwright');
+  const pkg = join(dir, 'package.json');
+  if (existsSync(pkg)) {
+    const j = JSON.parse(readFileSync(pkg, 'utf8'));
+    if (j.version !== '0.0.0-cdp-shim') return false;   // a real one: leave it
+    if (readFileSync(join(dir, 'index.mjs'), 'utf8') === PW_INDEX) return false;
+  }
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(pkg, PW_PKG);
+  writeFileSync(join(dir, 'index.mjs'), PW_INDEX);
+  if (verbose) console.log('  vendorlink: wrote node_modules/playwright -> tools/cdp.mjs');
+  return true;
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const wrote = ensureThree(true);
-  console.log(wrote ? 'linked' : 'already linked');
+  const a = ensureThree(true);
+  const b = ensurePlaywright(true);
+  console.log(a || b ? 'linked' : 'already linked');
 }

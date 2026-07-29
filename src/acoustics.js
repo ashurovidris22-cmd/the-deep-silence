@@ -258,7 +258,26 @@ export const MOTOR = {
  */
 export const EAR = {
   waterLoss: 0.28,     // linear gain out of the hull: about -11 dB of the 30-40
-  waterTilt: 1700,     // Hz, low-pass corner for bone conduction
+  /* Hz, low-pass corner outside the hull — and this was 1700, which was both
+   * wrong and actively harmful.
+   *
+   * Wrong because the underwater hearing loss is broadband, not a roll-off:
+   * divers hear well past 10 kHz, and the 30-40 dB they lose is a sensitivity
+   * shift across the band, which `waterLoss` above already models. That argument
+   * stands on its own and is the reason for the change.
+   *
+   * The evidence that prompted it was weaker than it looked, and that is worth
+   * recording. The first render of the excursion scene put the 4 and 8 kHz
+   * octaves at -49 and -66 dB, which read as "the 3.1 kHz pinger has been
+   * filtered out" — but a band average under-reads a transient by its duty cycle,
+   * and a 0.13 s ping every two seconds is six per cent, or -12 dB before
+   * anything else. Isolating the pinger in its own scene showed it present and
+   * healthy. **The measurement was right and the reading of it was wrong**; the
+   * physics is why this number moved, not the graph.
+   *
+   * Raised to 4500 so the beacon is comfortable; the cabin is still brighter at
+   * 8000, so crossing the hatch still changes the world. */
+  waterTilt: 4500,
   waterSpread: 0.85,   // 0 = pinpoint, 1 = fully diffuse. Localisation is gone.
   cabinTilt: 8000,     // Hz, air path, essentially open
   cabinRT: 0.35,       // s, RT60 of a steel tube with soft goods in it

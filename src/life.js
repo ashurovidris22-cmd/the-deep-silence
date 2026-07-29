@@ -108,7 +108,13 @@ export class Life {
    * computer shows and is honest about: swim harder and the number drops faster
    * than one minute per minute.
    */
-  get minutesLeft() { return (CAPACITY - this.co2) / Math.max(1e-4, this.rate); }
+  get minutesLeft() {
+    /* Clamped, because a frame caught it reading "0% - 2.4 MIN". `co2` can
+     * overshoot capacity inside the tick that spends the last of it, and a
+     * readout that goes negative tells the player the instrument is broken at
+     * the exact moment they most need to believe it. */
+    return Math.max(0, (CAPACITY - this.co2) / Math.max(1e-4, this.rate));
+  }
 
   /**
    * @param dt seconds

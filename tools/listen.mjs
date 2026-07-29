@@ -48,7 +48,27 @@ const SCENES = {
   // Outside the hull, a long way from the trunk, breathing hard and low on
   // sorbent. The pinger, the lungs and the alarm all live in this one.
   water: (t) => ({ depth: 400, aboard: false, earZ: 24, throttle: 0.4, ballast: 0.5, ballastCmd: 0.5, way: 2, grounded: false, contact: 0, breath: 26 + t, alarm: 1, phase: 'critical', boatRange: 78, scrubber: 0.06 }),
+  /* Outside, far out, calm, sorbent to spare — so the pinger is the only thing
+   * happening. Added because in `water` the 4 kHz octave sat 40 dB down and it
+   * was not clear whether that meant inaudible or merely sparse: a band average
+   * under-reads a transient by its duty cycle, and a 0.13 s ping every two
+   * seconds is six per cent, which is -12 dB before anything else. */
+  beacon: () => ({ depth: 400, aboard: false, earZ: 24, throttle: 0, ballast: 0.5, ballastCmd: 0.5, way: 0, grounded: false, contact: 0, breath: 11, alarm: 0, phase: 'ok', boatRange: 60, scrubber: 1 }),
 };
+
+/* Resolve the scene ONCE, here, and refuse an unknown name.
+ *
+ * The in-page copy of this table used to fall back to `descent` for anything it
+ * did not recognise, so asking for a scene that was only half-added rendered a
+ * completely different one and printed the name that had been asked for. Ten
+ * minutes were spent reading a spectrum belonging to another scene. That is the
+ * exact failure this harness exists to prevent — `boot.mjs`'s header is about a
+ * capture that silently photographs the title card — and it had been reproduced
+ * inside the tool itself. */
+if (!SCENES[scene]) {
+  console.log(`\n  unknown scene "${scene}". Known: ${Object.keys(SCENES).join(', ')}\n`);
+  process.exit(2);
+}
 
 const bands = [31.25, 62.5, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
 
@@ -234,7 +254,12 @@ async function renderMode() {
    * an offline render is deterministic and faster than real time — the same
    * argument as seeding the world's PRNG. The scene's parameter sets are passed
    * in from here so both modes drive the same sequence. */
-  const out = await page.evaluate(async ({ seconds, sceneName, bands }) => {
+  const DT = 1 / 60;
+  const fn = SCENES[scene];
+  const timeline = [];
+  for (let i = 0; i < Math.floor(seconds / DT); i++) timeline.push(fn(i * DT));
+
+  const out = await page.evaluate(async ({ seconds, timeline, bands }) => {
     const mod = await import('/src/audio.js');
     const SR = 48000;
     const ctx = new OfflineAudioContext(1, Math.ceil(SR * seconds), SR);
@@ -249,21 +274,15 @@ async function renderMode() {
     /* Web Audio schedules against ctx.currentTime, which does not advance until
      * the render runs. So push the whole parameter timeline first, with an
      * explicit clock, then render once. */
+    /* The parameter timeline is computed in node from the single scene table and
+     * handed over, rather than the table being duplicated in here. It was
+     * duplicated, the two copies drifted the moment a scene was added, and the
+     * page's copy silently substituted another scene. One owner. */
     const DT = 1 / 60;
-    const scenes = {
-      silence: () => ({ depth: 423, aboard: true, earZ: 6.9, throttle: 0, ballast: 0.5, ballastCmd: 0.5, way: 0, grounded: true, contact: 0, breath: 12, alarm: 0, phase: 'ok', boatRange: 0, scrubber: 1 }),
-      descent: (t) => ({ depth: 120 + t * 1.81, aboard: true, earZ: 6.9, throttle: 0, ballast: 1, ballastCmd: 1, way: 0, grounded: false, contact: 0, breath: 12, alarm: 0, phase: 'ok', boatRange: 0, scrubber: 1 }),
-      plant: () => ({ depth: 300, aboard: true, earZ: -3.95, throttle: 1, ballast: 0.5, ballastCmd: 0.5, way: 4.5, grounded: false, contact: 0, breath: 12, alarm: 0, phase: 'ok', boatRange: 0, scrubber: 1 }),
-      blow: (t) => ({ depth: 400, aboard: true, earZ: 6.9, throttle: 0, ballast: 0.5, ballastCmd: t < 1.2 ? 0.5 - t * 0.42 : 0.0, way: 0, grounded: false, contact: 0, breath: 12, alarm: 0, phase: 'ok', boatRange: 0, scrubber: 1 }),
-      // Outside the hull, a long way from the trunk, breathing hard and low on
-  // sorbent. The pinger, the lungs and the alarm all live in this one.
-  water: (t) => ({ depth: 400, aboard: false, earZ: 24, throttle: 0.4, ballast: 0.5, ballastCmd: 0.5, way: 2, grounded: false, contact: 0, breath: 26 + t, alarm: 1, phase: 'critical', boatRange: 78, scrubber: 0.06 }),
-    };
-    const fn = scenes[sceneName] || scenes.descent;
     let clock = 0;
-    for (let i = 0; i < Math.floor(seconds / DT); i++) {
+    for (const st of timeline) {
       Object.defineProperty(ctx, 'currentTime', { value: clock, configurable: true });
-      a.update(DT, fn(clock));
+      a.update(DT, st);
       clock += DT;
     }
     const buf = await ctx.startRendering();
@@ -279,18 +298,32 @@ async function renderMode() {
     }
     const rms = Math.sqrt(sum / d.length);
 
-    /* Energy per octave by Goertzel at each band centre — a full FFT is not
-     * needed to answer "is there anything at 358 Hz". */
-    const energy = bands.map((f) => {
-      const w = 2 * Math.PI * f / SR;
-      const c = 2 * Math.cos(w);
+    /* Energy per octave, by Goertzel averaged ACROSS each band.
+     *
+     * The first version evaluated one bin at each centre frequency and called the
+     * result "energy by octave". Over four seconds a bin is 0.25 Hz wide, so for
+     * broadband noise that is a single sample of a random variable — it reported
+     * 500 Hz at -5 dB with 250 and 1000 Hz thirty decibels below, which is not a
+     * spectrum, it is a fluke. Nine probes spread geometrically over each octave
+     * and averaged in power gives the band its actual energy, and costs nine
+     * times almost nothing. */
+    const n = Math.min(d.length, SR * 4);
+    const goertzel = (f) => {
+      const c = 2 * Math.cos(2 * Math.PI * f / SR);
       let s1 = 0, s2 = 0;
-      const n = Math.min(d.length, SR * 4);
       for (let i = 0; i < n; i++) { const s0 = d[i] + c * s1 - s2; s2 = s1; s1 = s0; }
-      return Math.sqrt(s1 * s1 + s2 * s2 - c * s1 * s2) / n;
+      return (s1 * s1 + s2 * s2 - c * s1 * s2) / (n * n);   // power, not amplitude
+    };
+    const energy = bands.map((f) => {
+      let acc = 0, k = 0;
+      for (let j = -4; j <= 4; j++) {
+        const fj = f * Math.pow(2, j / 12);      // a semitone apart, inside the octave
+        if (fj > 20 && fj < SR / 2 - 100) { acc += goertzel(fj); k++; }
+      }
+      return Math.sqrt(acc / Math.max(1, k));
     });
     return { rms, peak, clipped, samples: d.length, energy, events: a._events, voices: a.voices, report: a.report() };
-  }, { seconds, sceneName: scene, bands });
+  }, { seconds, timeline, bands });
 
   await browser.close();
   if (out.error) { console.log('\n  render failed:', out.error, '\n'); return 1; }

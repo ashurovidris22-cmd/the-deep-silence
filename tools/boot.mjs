@@ -5,7 +5,18 @@
  * that the picture is wrong, which is exactly the clue a judge cannot give you
  * about a frame it has never seen correctly.
  */
-import { chromium } from 'playwright';
+/* Resolve `playwright` before importing it.
+ *
+ * If a real one is installed this is a no-op and the real one wins. If the npm
+ * registry was unreachable — which has now happened in two consecutive sessions —
+ * this points the specifier at `tools/cdp.mjs`, a dependency-free DevTools client
+ * covering the fifteen methods this harness actually uses. Either way the import
+ * below succeeds, which is the point: no tool in here should be stopped by a
+ * registry. */
+import { ensurePlaywright } from './vendorlink.mjs';
+
+ensurePlaywright();
+const { chromium } = await import('playwright');
 
 export const GPU_ARGS = [
   // No GPU in this container, so WebGL2 has to come from SwiftShader. Slow but

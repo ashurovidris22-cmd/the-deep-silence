@@ -79,8 +79,15 @@ export class Audio {
       if (!Ctx) throw new Error('no AudioContext in this browser');
       const ctx = new Ctx({ latencyHint: 'interactive' });
       this.ctx = ctx;
+      /* An OfflineAudioContext is 'suspended' until `startRendering`, and calling
+       * `resume()` on one throws. `tools/listen.mjs` builds this graph on an
+       * offline context to measure it, so the live-context recovery below has to
+       * know the difference — found by the first render that ever ran, which
+       * filled the console with InvalidStateError and told me nothing about the
+       * sound. `startRendering` is the discriminator the API actually gives. */
+      this.offline = typeof ctx.startRendering === 'function';
       this._build(ctx);
-      ctx.resume?.();
+      if (!this.offline) ctx.resume?.();
       this.state = 'running';
       return true;
     } catch (e) {
@@ -405,7 +412,7 @@ export class Audio {
        * autoplay policy, a background tab, an audio device that went away. That
        * is silence indistinguishable from working silence, so retry, at most
        * once a second, and let F3 show `ctx.state` either way. */
-      if (this.ctx.state === 'suspended') {
+      if (!this.offline && this.ctx.state === 'suspended') {
         this._retry = (this._retry || 0) + dt;
         if (this._retry > 1) { this._retry = 0; this.ctx.resume?.(); }
       }
