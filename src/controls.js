@@ -17,6 +17,37 @@ import { seabedHeight, WORLD_R } from './terrain.js';
 const D2R = Math.PI / 180;
 const UP = new THREE.Vector3(0, 1, 0);
 
+/**
+ * The camera's look direction for a yaw and a pitch. **The one owner of this
+ * basis.**
+ *
+ * This formula was written out three times in this file — twice in full and once
+ * with pitch dropped — and it is the definition of which way "right" is for the
+ * whole game. That mattered when the vessel turned out to steer the wrong way:
+ * the fix needed a test, the test needed this basis, and a test that transcribes
+ * the thing it is checking proves only that two copies agree.
+ *
+ * Positive yaw is clockwise seen from above: yaw 0 looks down -Z, yaw +90 looks
+ * along +X. Note that `Vessel` uses the opposite convention for its own heading
+ * (+cos rather than -cos), which is why `apply()` composes the two with a minus
+ * and why the rudder needed one.
+ */
+export function headingDir(yaw, pitch = 0, out = new THREE.Vector3()) {
+  const cp = Math.cos(pitch);
+  return out.set(Math.sin(yaw) * cp, Math.sin(pitch), -Math.cos(yaw) * cp);
+}
+
+/**
+ * Screen-right for a look direction. Also one owner, for the same reason.
+ *
+ * `cross(forward, up)`, which is the camera's +X axis in a right-handed basis.
+ * The hand-written version of this in the walking path was its own negative, so
+ * A and D were swapped while walking and only while walking.
+ */
+export function screenRight(dir, out = new THREE.Vector3()) {
+  return out.crossVectors(dir, UP).normalize();
+}
+
 export class Pilot {
   constructor(camera, canvas) {
     this.camera = camera;
@@ -178,11 +209,7 @@ export class Pilot {
     } else {
       this.camera.position.copy(this.pos);
     }
-    const dir = new THREE.Vector3(
-      Math.sin(wy) * Math.cos(this.pitch),
-      Math.sin(this.pitch),
-      -Math.cos(wy) * Math.cos(this.pitch),
-    );
+    const dir = headingDir(wy, this.pitch);
     this.camera.lookAt(this.camera.position.clone().add(dir));
   }
 
@@ -195,12 +222,8 @@ export class Pilot {
     if (this.walk) { this._walk(dt); return; }
 
     const k = this.keys;
-    const fwd = new THREE.Vector3(
-      Math.sin(this.yaw) * Math.cos(this.pitch),
-      Math.sin(this.pitch),
-      -Math.cos(this.yaw) * Math.cos(this.pitch),
-    );
-    const right = new THREE.Vector3().crossVectors(fwd, UP).normalize();
+    const fwd = headingDir(this.yaw, this.pitch);
+    const right = screenRight(fwd);
 
     const a = new THREE.Vector3();
     if (k.has('KeyW')) a.addScaledVector(fwd, 1);
@@ -273,16 +296,14 @@ export class Pilot {
      * was nailed down was to keep this one line simple. */
     const p = this.pos;
 
-    const fwd = new THREE.Vector3(Math.sin(this.yaw), 0, -Math.cos(this.yaw));
-    /* Derived by cross product, exactly as the swim path does it.
-     *
-     * This was hand-written as (fwd.z, 0, -fwd.x), which is the negative of
-     * cross(fwd, up) = (-fwd.z, 0, fwd.x) — so A and D were swapped, and only
-     * while walking. Two movement paths that disagree about which way is right is
-     * worse than either being wrong, because the error appears and disappears as
-     * the player changes mode and reads as the game being broken rather than as
-     * a control preference. Compute it; never transcribe it. */
-    const right = new THREE.Vector3().crossVectors(fwd, UP).normalize();
+    /* Walking is planar, so pitch is dropped — looking at the deckhead must not
+     * drive you into it. Otherwise the same basis as the swim path, and now
+     * literally the same function: this used to be a fourth hand-written copy,
+     * and the strafe vector used to be a fifth, written as (fwd.z, 0, -fwd.x),
+     * which is the *negative* of cross(fwd, up) — so A and D were swapped, and
+     * only while walking. Compute it; never transcribe it. */
+    const fwd = headingDir(this.yaw, 0);
+    const right = screenRight(fwd);
     const wish = new THREE.Vector3();
     if (k.has('KeyW')) wish.add(fwd);
     if (k.has('KeyS')) wish.sub(fwd);

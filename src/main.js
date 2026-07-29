@@ -8,10 +8,11 @@ import { buildStation } from './structures.js';
 import { buildSub } from './sub.js';
 import { buildInterior, interiorSolids, hullHalfWidth, DECK_Y, EYE, HULL_LEN, HULL_R, HELM } from './interior.js';
 import { Post } from './post.js';
-import { Pilot } from './controls.js';
+import { Pilot, headingDir, screenRight } from './controls.js';
 import { Vessel } from './vessel.js';
 import { buildExterior } from './exterior.js';
 import { Audio } from './audio.js';
+import { Life } from './life.js';
 import { FS_VERT, WATER } from './glsl.js';
 
 const qs = new URLSearchParams(location.search);
@@ -245,6 +246,19 @@ const post = new Post(renderer);
  * is the same switch for a human. */
 const audio = new Audio();
 const wantSound = qStr('sound', qStr('auto', '0') === '1' ? '0' : '1') === '1';
+/* The score is separable from the rest of the sound, deliberately.
+ *
+ * It is the one voice in the game that is not diegetic, and it is the one the
+ * player is most likely to disagree with — the brief for it was "tastefully",
+ * which is a matter of taste by construction. `?music=0` leaves every instrument
+ * intact and takes the drone away, which is a different request from muting. */
+const wantMusic = qStr('music', '1') === '1';
+
+/* Life support, which is what makes leaving the boat an excursion rather than a
+ * change of camera. The limit is the suit's CO2 canister rather than a gas
+ * supply, because at 43 atmospheres open circuit is not a thing that works —
+ * see `src/life.js`, where the duration is derived rather than balanced. */
+const life = new Life();
 /* Never less than this much water overhead. Six metres is enough that the
  * daylight term stays bounded and the vehicle reads as submerged; it also means
  * the exposure never has to cope with a breach it was not designed for. */
@@ -317,9 +331,30 @@ function enterSwim() {
   pilot.pitch = -0.15;
   pilot.apply();
 }
+/** Hull-local point of the conning trunk's lip, where you climb in and out. */
+const TRUNK = new THREE.Vector3(HATCH.x, 3.0, HATCH.z);
+/** Distance from the swimmer to that lip, in metres. */
+function hatchRange() {
+  return pilot.pos.distanceTo(vessel.toWorld(TRUNK, new THREE.Vector3()));
+}
 pilot.toggleMode = () => {
-  // Coming back aboard: the heading has to go back into the hull's frame too.
-  if (game.mode === 'swim') { pilot.yaw += vessel.yaw; enterWalk(); return; }
+  /* Coming back aboard, and it now requires being *at* the hatch.
+   *
+   * This was unconditional: V from anywhere in the ocean put you back inside,
+   * while the on-screen prompt was gated at nine metres — so the rule the player
+   * was shown and the rule the code enforced were different, and the generous one
+   * won silently. Harmless while there was nothing at stake outside. The moment
+   * the canister became the reason to come back, it was the whole loop: a swimmer
+   * three hundred metres away with a spent scrubber could simply teleport home,
+   * and every number in `life.js` would have been decoration.
+   *
+   * Five metres of the trunk, not of the boat's centre — the hull is eighteen
+   * metres long, so "near the vessel" would let you climb in through the stern. */
+  if (game.mode === 'swim') {
+    if (hatchRange() > 5.0) return;
+    // The heading has to go back into the hull's frame too.
+    pilot.yaw += vessel.yaw; enterWalk(); return;
+  }
   // Only from under the hatch. Anywhere else, say so rather than doing nothing.
   if (game.mode === 'walk' && nearHatch()) enterSwim();
 };
@@ -511,6 +546,54 @@ const beaconSpecs = [
 ];
 const beacons = buildBeacons(env, beaconSpecs);
 scene.add(beacons);
+
+/* ------------------------------------------------------- the boat's own light
+ *
+ * A player reported getting lost the moment they left the hull, which is exactly
+ * right: visibility is twenty-one metres and the boat is unlit, so eight strokes
+ * away it is gone and every direction looks identical.
+ *
+ * The light marks the *trunk*, not the middle of the hull, because what a lost
+ * swimmer needs is not the boat but the way in.
+ *
+ * Amber, and that is an art-direction decision rather than a taste one: green is
+ * reserved for bioluminescence, the only saturated colour this game permits, and
+ * a green light on the boat would read as something alive. The reference frame
+ * that carries the whole mood is a catwalk with two red lamps in near-blackness,
+ * so man-made light here is warm.
+ *
+ * Built as its own one-point group rather than parented to the hull, because the
+ * beacon shader takes `position` as world space — it multiplies by `viewMatrix`
+ * and never touches the model matrix — so a moving parent would have no effect on
+ * where it drew and would break the water term, which reads `vW` for distance.
+ * Writing three floats into the attribute each frame is cheaper than either
+ * fixing that or having two shaders. */
+const boatBeacon = buildBeacons(env, [{ pos: [0, 0, 0], col: [1, 1, 1], size: 0.42 }]);
+boatBeacon.frustumCulled = false;
+scene.add(boatBeacon);
+env.register(boatBeacon.userData.mat);
+const BEACON_LOCAL = new THREE.Vector3(0, 3.15, -1.5);
+const _beaconW = new THREE.Vector3();
+// Scratch for the wrist unit, allocated once: this runs every frame.
+const _exoT = new THREE.Vector3(), _exoD = new THREE.Vector3();
+const _exoF = new THREE.Vector3(), _exoR = new THREE.Vector3();
+/* Once every 2.4 s, and short. A steady lamp at this range is a dim smudge that
+ * the eye stops seeing; a flash is found by peripheral vision, which is the whole
+ * reason navigation lights flash. */
+function updateBoatBeacon(t) {
+  vessel.toWorld(BEACON_LOCAL, _beaconW);
+  const pa = boatBeacon.children[0].geometry.attributes;
+  pa.position.setXYZ(0, _beaconW.x, _beaconW.y, _beaconW.z);
+  pa.position.needsUpdate = true;
+  // Two quick pulses then a gap, so it cannot be mistaken for the station's
+  // steady hazard lamps.
+  const ph = (t % 2.4) / 2.4;
+  const flash = Math.exp(-Math.pow((ph - 0.02) / 0.035, 2))
+    + 0.75 * Math.exp(-Math.pow((ph - 0.13) / 0.035, 2));
+  const k = 0.12 + 15.0 * flash;
+  pa.aCol.setXYZ(0, 1.00 * k, 0.42 * k, 0.16 * k);
+  pa.aCol.needsUpdate = true;
+}
 
 env.points = [
   { pos: new THREE.Vector3(34, -390, -12), col: new THREE.Vector3(9.0, 12.0, 13.5) },
@@ -939,9 +1022,17 @@ const game = {
         const el = document.getElementById(id);
         if (el) el.hidden = !on;
       }
-      for (const id of ['stats', 'prompt']) {
+      for (const id of ['stats', 'prompt', 'exo']) {
         const el = document.getElementById(id);
         if (el && !on) el.hidden = true;
+      }
+      /* The overlays are opacity rather than hidden, and the frame loop rewrites
+       * them every tick, so `uiOff` is what actually holds them off — same latch
+       * the prompt needs. Left visible, a blackout would darken a review frame
+       * and the next reader would go looking for it in the exposure code. */
+      for (const id of ['veil', 'fade']) {
+        const el = document.getElementById(id);
+        if (el && !on) el.style.opacity = '0';
       }
     }
   },
@@ -1017,6 +1108,7 @@ function frame() {
   }
   vessel.update(dt, env.surfaceY - MIN_DEPTH);
   vessel.applyTo(boat.mesh);
+  updateBoatBeacon(game.time);
   /* Refresh what the swimmer can bump into. The static installations never move,
    * so they are appended once; the boat does, so her capsule is rebuilt from the
    * hull's own half-length every frame. Swimming through your own submarine was
@@ -1125,10 +1217,35 @@ function frame() {
    * geometric test serves both the renderer and the ear. `eyeL.z` is the
    * listener's station along the hull, which is what makes the pump loud in the
    * machinery space and distant at the wheel. */
+  /* Life support, on the same gate. Aboard the canister gets swapped; outside it
+   * fills with what the swimmer breathes out, faster the harder they swim. */
+  life.update(dt, { aboard, speed: pilot.speed });
+  for (const e of life.events) {
+    /* Coming round. `life.js` deliberately does not know where "aboard" is, so
+     * it raises the event and the world does the placing — the same division as
+     * the sound layer, where the mapping never touches an AudioContext.
+     *
+     * Waking on a bunk rather than at the hatch, because being carried in is a
+     * story and standing up in the airlock is a respawn. */
+    if (e.kind === 'wake') {
+      const b = INSIDE.bunks;
+      enterWalk();
+      pilot.enabled = true;
+      pilot.pos.set(b.x, DECK_Y + EYE, b.z);
+      pilot.setFrom(pilot.pos.clone(), b.yaw, 0);
+    }
+  }
+
   audio.update(dt, {
     depth: game.depth, aboard, earZ: eyeL.z,
     throttle: vessel.throttle, ballast: vessel.ballast, ballastCmd: vessel.ballastCmd,
     way: vessel.way, grounded: vessel.grounded, contact: vessel.contact,
+    // What the excursion sounds like: breathing, the alarm, and the way home.
+    breath: life.breath, alarm: life.alarm, phase: life.phase,
+    scrubber: life.remaining,
+    // Range to the trunk, not to the hull's centre — the pinger marks the way in.
+    boatRange: aboard ? 0 : hatchRange(),
+    music: wantMusic,
   });
 
   renderer.info.reset();
@@ -1151,8 +1268,11 @@ function frame() {
     if (lp.z > HELM.z - 2.4 && Math.abs(lp.x) < 1.1) pmsg = 'Take the helm';
     else if (nearHatch()) pmsg = 'V — go outside through the hatch';
   } else if (game.mode === 'swim') {
-    const d = pilot.pos.distanceTo(vessel.pos);
-    if (d < 9) pmsg = 'V — back inside';
+    /* The same function the action uses, and the same threshold. These were two
+     * different rules — the prompt measured nine metres to the hull's centre, the
+     * action measured nothing at all — which is how a player learns a control
+     * works differently from how it was advertised. */
+    if (hatchRange() < 5.0) pmsg = 'V — back inside';
   }
   if (pmsg && !game.uiOff) { ptext.textContent = pmsg; prompt.hidden = false; } else prompt.hidden = true;
 
@@ -1179,6 +1299,49 @@ function frame() {
     document.getElementById('hDepth').textContent = Math.round(game.depth);
     document.getElementById('hHull').textContent = Math.round(game.pressure);
     document.getElementById('hSpeed').textContent = pilot.speed.toFixed(1);
+  }
+
+  /* --------------------------------------------------------- the wrist unit
+   *
+   * Only while outside, and gated on the geometry rather than on the mode for the
+   * same reason everything else is.
+   *
+   * The arrow shows the bearing *relative to where the player is looking*, which
+   * is the only form of it that helps. An absolute compass bearing is a number you
+   * then have to solve against your own heading, in the dark, while running out of
+   * scrubber. Relative bearing is "the boat is that way" and needs no arithmetic:
+   * zero is straight ahead, and the arrow is drawn pointing up.
+   *
+   * `atan2(dot(d, right), dot(d, fwd))` is the standard reduction and it uses the
+   * camera's real basis, imported from controls.js — the same functions the
+   * steering test uses, because a bearing written out by hand here would be the
+   * fifth copy of a formula that has already been wrong twice in this project. */
+  const exo = document.getElementById('exo');
+  const showExo = !aboard && !game.uiOff && !hud.hidden;
+  exo.hidden = !showExo;
+  if (showExo) {
+    const target = vessel.toWorld(TRUNK, _exoT);
+    const d = _exoD.subVectors(target, camera.position);
+    const range = d.length();
+    const fwd = headingDir(pilot.yaw, 0, _exoF);
+    const rgt = screenRight(fwd, _exoR);
+    // Flat bearing: the vertical component is not what "which way is home" means.
+    const rel = Math.atan2(d.x * rgt.x + d.z * rgt.z, d.x * fwd.x + d.z * fwd.z);
+    document.getElementById('exoArrow').style.transform =
+      `rotate(${(rel * 180 / Math.PI).toFixed(1)}deg)`;
+    document.getElementById('exoRange').textContent = range.toFixed(0);
+    document.getElementById('exoBrg').textContent =
+      String(Math.round(((rel * 180 / Math.PI) + 360) % 360)).padStart(3, '0');
+    document.getElementById('exoPct').textContent = (life.remaining * 100).toFixed(0);
+    document.getElementById('exoMin').textContent = life.minutesLeft.toFixed(1);
+    const sc = document.getElementById('exoScrub');
+    const cls = life.phase === 'critical' || life.phase === 'blackout' ? 'crit'
+      : life.phase === 'warn' ? 'warn' : '';
+    if (sc.className !== cls) sc.className = cls;
+  }
+  if (!game.uiOff) {
+    document.getElementById('veil').style.opacity = life.veil.toFixed(3);
+    document.getElementById('fade').style.opacity = life.fade.toFixed(3);
   }
   /* The diagnostic panel, and it exists because asking a player to read internals
    * is the wrong way round.
@@ -1214,6 +1377,10 @@ function frame() {
        * 400 m down. `creak/s` is the one number that says whether the hull
        * *should* be talking, which makes "I hear nothing" answerable. */
       audio.report(),
+      /* The excursion, on the panel for the same reason. "I ran out and had
+       * no idea why" is answerable from a photograph once the rate is printed:
+       * the canister is spent by how hard you swam, not by the clock. */
+      life.report() + (aboard ? '   aboard' : `   out, trunk ${hatchRange().toFixed(0)} m`),
     ].join('\n');
   }
 }

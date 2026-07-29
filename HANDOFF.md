@@ -49,7 +49,9 @@ survive into a new session:
   is free. No subscription is needed for any of this.
 
 Useful URLs while working: `?stats=1`, `?pose=<name>`, `?dof=0`, `?vsteps=`,
-`?vscale=`, `?invertY=1`, `?sens=`, `?auto=1`, `?hud=0`.
+`?vscale=`, `?invertY=1`, `?sens=`, `?auto=1`, `?hud=0`, `?sound=0`, `?music=0`.
+**`?music=0` leaves every instrument and takes only the drone**, which is a
+different request from muting and is the one most likely to be wanted.
 
 **`?depth=` now requires `?auto=1`,** and that is deliberate — see the ledger. It
 moves the sea surface to fake a depth, which desynchronises the world from the
@@ -129,7 +131,9 @@ iterating; take quality verdicts at full settings.
 
 - **F3** — the diagnostic panel. fps, resolution, draws, triangles, depth, zone,
   visibility, pressure, mode, lamp, exposure, depth band, the sun term at the eye,
-  camera and vessel positions, heading, way, throttle, ballast, ground contact.
+  camera and vessel positions, heading, way, throttle, ballast, ground contact,
+  the sound layer's state, and life support: scrubber percentage, projected minutes,
+  litres per minute, breathing rate and range to the trunk.
   Built after three sessions of failing to answer a question that this panel
   settled in one screenshot. **When asking the player for a measurement, ask for
   a photograph of this rather than for a description.**
@@ -175,6 +179,7 @@ src/hull.js       the five principal dimensions, and no imports at all
 src/jerlov.js     seawater optics constants, with provenance
 src/acoustics.js  underwater acoustics constants + the state-to-sound map. Pure
 src/audio.js      the synthesiser: owns the AudioContext, decides nothing
+src/life.js       the suit's CO2 scrubber. Pure arithmetic, no imports at all
 src/glsl.js       shared GLSL: noise, the water model, caustics, phase function
 src/loft.js       profile sweeping — the technique that beats stacked primitives
 src/terrain.js    the canyon: shelf, wall, floor. seabedHeight(), lightAt()
@@ -403,6 +408,62 @@ against the drawn profile, tightest clearance +65 mm. For a question of the form
 "is this inside that", a number is a stronger answer than a frame — and it costs
 a second instead of four minutes.
 
+### Added by the steering and excursion pass
+
+- **The vessel and the camera have opposite handedness, and only two of the three
+  places that care had been reconciled.** `Vessel` builds `forward = (sin y, 0,
+  +cos y)`, so positive yaw carries the bow from +Z toward +X, which seen from
+  above is *counter*-clockwise. `Pilot.apply()` knows this and composes the two
+  bases with a minus, with ten lines of comment. Nothing ever checked the
+  *control* or the *readout* against it:
+  - `rudder = +1`, which every name in the file calls starboard, swung the bow to
+    the pilot's **left**. Measured at full ahead, `swing · screenRight = -0.986`.
+    A player reported it as "steering is inverted" and it was, exactly.
+  - a turn to starboard ran the compass **backwards** — 0 to 279.7 degrees — and
+    that value feeds `iu.uHeading`, so the console gauge was mirrored too. The
+    dial was drawn correctly all along; it was being lied to.
+  - the `heading` docstring claimed "clockwise seen from above", which it never was.
+
+  Both fixed with one sign each, and no geometry touched — `forward()`, `toWorld()`,
+  `toLocal()` and `applyTo()` stay mutually consistent. **It survived the entire
+  piloting pass because a rudder does nothing at rest**, so nothing that was not
+  actually under way could have noticed. `tools/dyn.mjs --only helm` now asserts
+  both signs against the *imported* camera basis.
+- **The basis formula existed five times.** Three copies of the look direction in
+  `controls.js` and two of the strafe vector, one of which was its own negative
+  (that was the old A/D-swapped-while-walking bug). A steering test that writes it
+  out a sixth time proves only that two copies of a mistake agree, so it is now
+  `headingDir()` and `screenRight()`, exported, and the test imports them.
+- **Re-entry to the boat was unconditional while the prompt was gated.** `V` from
+  anywhere in the ocean put you back inside; the on-screen prompt appeared at nine
+  metres. So the rule the player was shown and the rule the code enforced were
+  different, and the generous one won silently. Harmless while there was nothing
+  at stake outside — and the whole loop the moment the canister became the reason
+  to come back, because a swimmer 300 m out with a spent scrubber could simply
+  teleport home and every number in `life.js` would have been decoration. Now five
+  metres of the *trunk*, and the prompt calls the same function with the same
+  threshold. **A gate on the prompt is not a gate on the action.**
+- **The worst masking is not under the loudest sound, it is in the gap after it.**
+  The score's ceiling was set by a case nobody would look for: the boat touches
+  down, the loading rate collapses, the hull stops creaking and the "busy hull
+  crowds the score" term opens back up — but the drone is still near the top of
+  its range, because it falls with a 22 s constant while the hull went quiet in
+  one. Twenty seconds of full-level score over a silent hull, which is precisely
+  when a creak has to be heard. Raising the crowd term did nothing for the margin;
+  the ceiling had to come down. **Two envelopes with different time constants
+  produce their worst overlap during the decay, not during the peak.**
+- **Ducking the score on every event silenced it exactly when the game was
+  frightening.** A descent creaks three times a second, so a per-event duck held
+  the drone at a quarter of its level for the entire descent — measured 0.007
+  against a ceiling of 0.052. Split into two mechanisms: a busy hull *crowds* it
+  down smoothly (it is ambience), and only a big transient or the alarm ducks it
+  sharply (those are information). An ordinary creak now does neither.
+- **A leak checker that cannot see half the voices reports a clean run.** The stub
+  `AudioContext` in `listen.mjs` made oscillator `start`/`stop` no-ops, so
+  `onended` never fired for the pinger or the alarm and sixteen voices "leaked" in
+  the stub while the real graph was fine. Fixed by making the stub end them, which
+  is the only reason the check means anything.
+
 ### Added by the sound pass
 
 All three of these were found by arithmetic, and the first two were found before
@@ -618,7 +679,58 @@ turning circle at full rudder, 1.8 m/s vertical when hard blown so the 400 m
 from the floor to the shelf takes roughly four minutes.
 
 **Helm controls:** W/S telegraph, A/D wheel, Space/C blow/flood, Shift for a
-faster telegraph, X all stop, E to stand up. **M mutes.**
+faster telegraph, X all stop, E to stand up. **M mutes.** V at the hatch to go
+outside, and V within five metres of the trunk to come back in.
+
+**Leaving the boat is an excursion now, not a change of camera.** Three pieces,
+and they only work together — a reason to come back without a way home is a
+punishment, and a way home without a reason is scenery.
+
+- **The limit is the suit's CO2 scrubber, not a gas supply**, and that is forced
+  rather than chosen: a demand regulator delivers at ambient pressure, so at 43
+  atmospheres an hour's cylinder lasts eighty-three seconds. Deep work is
+  closed-circuit, oxygen is consumed metabolically and is nearly depth-independent,
+  and what runs out is the sorbent. Which is why the boat has a scrubber and an
+  "O2" valve tag already sitting in the machinery space — the fiction was built
+  before the mechanic. Duration is derived in `src/life.js` from 0.25 kg of
+  Sofnolime at 120 l/kg, halved for 4 °C water: **15 litres of CO2 usable.**
+  Measured: 59 minutes floating, 32 at a gentle drift, **17 at a cruise**, 9 at a
+  sprint. Moving carefully is worth more than any other decision out there, and it
+  falls out of the physiology rather than being balanced in.
+- **At zero: hypercapnia, then you wake up on a bunk.** The vignette closes over
+  the last eight per cent of the canister, breathing goes to 43 a minute, four
+  seconds of fade, and you come round in the accommodation with a fresh canister.
+  Time is the only thing lost — there is no save system to reload and no death to
+  reload it from. Coming back *voluntarily* costs a 22 s canister swap, so the
+  readout does not snap to full at the hatch.
+- **Direction is light, distance is sound, and that split is the acoustics being
+  obeyed.** Outside the hull localisation is gone — interaural time difference
+  shrinks by the 4.4× sound-speed ratio — so a sound out there can honestly say
+  *how far* and cannot say *which way*. So: an amber strobe on the trunk carries
+  the bearing (amber because green is reserved for bioluminescence, and a green
+  light on the boat would read as something alive), and a 3.1 kHz pinger carries
+  the range by repetition rate alone, Geiger-counter style, from 3.1 s apart at
+  130 m down to a quarter-second alongside. Plus a wrist readout with a relative
+  bearing arrow, because a compass bearing is a number you then have to solve
+  against your own heading, in the dark, while running out of scrubber.
+
+**She has a score now, and it is capped by measurement.** Asked for as "tense
+music, tastefully", against a sound layer whose entire thesis is that silence is
+the art direction. Three rules keep it honest: it is tuned to the boat (root =
+the cabin's 36.5 Hz transverse air mode, top = the shell's 358.4 Hz ring
+frequency, a ratio of 9.82 — nearly but not quite three octaves and a third, so
+the drone is slightly inharmonic because the hull is); it is driven by state
+rather than by a timeline (loading rate, sorbent left, distance from home, and
+depth weighted *low* on purpose, because being deep is a constant and a constant
+is not tension); and it gets out of the way of every instrument by two separate
+mechanisms — a busy hull crowds it down smoothly, a big transient ducks it
+sharply. `?music=0` removes it and leaves everything else.
+
+The gate is enforced rather than asserted: `node tools/dyn.mjs --only score`
+measures the quietest creak against everything continuous at depth and fails below
+6 dB. It reads **6.5 dB**. On the shelf it reads −0.5 dB, and that is physics, not
+a defect — surface agitation noise is loudest in the shallows while hull stress is
+lowest there. It is also not where the game lives.
 
 **She has a voice now.** `src/acoustics.js` + `src/audio.js`, and the same rule as
 the water: the noise floor is not chosen, it is computed. Every frequency comes
@@ -661,29 +773,40 @@ only frightening against silence**, so that table in `acoustics.js` is a gate.
 
 ## 8. What to do next, in order
 
-1. **Listen to it.** The sound layer has never been *heard*. It was built and
-   measured in a session where `registry.npmjs.org` answered 403, so there was no
-   browser: `tools/dyn.mjs` verifies every time constant, `listen.mjs --mode
-   graph` verifies the graph builds with no NaNs and no leaked voices, and
-   **nothing has rendered a single sample.** First job of the next session with
-   network: `npm i playwright && npx playwright install chromium`, then
+1. **Listen to it, and look at it.** Two sessions of work have now shipped without
+   a browser, because `registry.npmjs.org` answered 403 both times. Everything
+   with a time constant is verified by `tools/dyn.mjs` and the audio graph is
+   verified structurally by `listen.mjs --mode graph` — **and not one sample has
+   been rendered, nor one frame photographed.** The second pass is the riskier of
+   the two, because it added things that can only be judged by eye: the amber
+   strobe on the trunk, the wrist unit's bearing arrow, the hypercapnia vignette
+   and the blackout fade. First job of the next session with network:
+   `npm i playwright && npx playwright install chromium`, then
    `node tools/listen.mjs --mode render --scene descent` (and `plant`, `blow`,
-   `silence`, `water`), then put headphones on. Expect the balance to need work —
-   the numbers are right, which is not the same as sounding right.
-2. **Re-run the visual survey.** Also blocked this session. The sound pass
-   touched `main.js`, `index.html` and `fitout.js`'s export block, so the frames
-   should be identical and that has not been confirmed. `node tools/survey.mjs
-   --w 800 --h 450` then the contact sheet.
+   `silence`, `water`), then `node tools/survey.mjs --w 800 --h 450` and the
+   contact sheet, then put headphones on. Expect the balance and the overlay
+   opacities to need work — the numbers being right is not the same as it looking
+   or sounding right.
+2. **Judge the score with a human ear, and be willing to delete it.** It is capped
+   at 0.028 against a bed of 0.040 and it passes the 6 dB creak gate, but "does it
+   damage the silence" is not a question arithmetic can close. If it does, the
+   honest fix is to remove it, not to tune it — the rest of the sound layer was
+   designed around the silence being real.
 3. **Creatures.** Procedural organics are the hardest thing in the project and
    there is finally headroom — 183 fps leaves room. Technique is known and written
    down: a sine along the spine in the vertex shader, Verlet chains for tentacles,
    a radial pulse for jellyfish. The scariest creature is the slowest, which is
    also the cheapest to animate. **They now have a soundscape to arrive into**,
    and a creature you hear before you see is a different animal.
-4. **A reason to go down.** She can be driven, the depth zones exist, the pressure
-   model is real and now audible, but nothing asks the player to use any of it.
-   This is a design gap, not a rendering one, and it is the largest thing standing
-   between "impressive" and "a game".
+4. **A reason to go *down*.** Half of this closed: leaving the hull now has a
+   clock on it and a way home, so an excursion is a decision. But that is a reason
+   to come *back*, and the descent itself still asks for nothing — she can be
+   driven, the zones exist, the pressure model is real and now audible, and no
+   part of the game wants the player at 400 m. Still a design gap rather than a
+   rendering one, and still the largest thing between "impressive" and "a game".
+   The excursion loop is the obvious hook to hang it on: something down there that
+   has to be reached on foot, far enough from the boat that fifteen minutes of
+   sorbent is a real budget.
 5. **Interior polish, the known weak spots.** The mess table and the galley
    counter still read as plain boxes at two metres and want the edge treatment
    the lockers got. The cabin is lit toward the top of its value range and could

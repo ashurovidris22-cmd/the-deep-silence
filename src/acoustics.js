@@ -266,6 +266,97 @@ export const EAR = {
   crossFade: 0.25,     // s through the hatch. Snapping this clicks.
 };
 
+/* ------------------------------------------------------------- the way home
+ *
+ * A player got lost the moment they left the hull, and the fix is split across
+ * two senses on purpose, because the acoustics already decided how:
+ * **outside the hull localisation is gone** — interaural time difference shrinks
+ * by the 4.4x sound-speed ratio — so a sound out here can honestly tell you *how
+ * far* and cannot honestly tell you *which way*.
+ *
+ * So the strobe on the trunk carries the direction, and this carries the range,
+ * by repetition rate alone. A Geiger counter, which is the most legible
+ * distance-to-thing signal ever built and needs no interface at all.
+ *
+ * 3.1 kHz because a diver recall beacon is audible by design — the 37.5 kHz of an
+ * aircraft locator pinger is ultrasonic and would be silence.
+ */
+export const PINGER = {
+  f: 3100,             // Hz
+  near: 0.26,          // s between pings, alongside
+  far: 3.1,            // s between pings, at the limit
+  range: 130,          // m at which the interval saturates
+  level: 0.075,
+};
+
+/* Breathing on a closed loop. Two events per cycle, because the counterlung
+ * makes inhalation and exhalation different sounds, and the asymmetry is most of
+ * what makes it read as a person rather than as a bellows. */
+export const BREATH = { level: 0.115, inhale: 620, exhale: 320 };
+
+/** The scrubber alarm. Not loud — it has to be heard *under* the breathing. */
+export const ALARM = { f: 2050, level: 0.085 };
+
+/* ---------------------------------------------------------------- the score
+ *
+ * Asked for as "tense music in the background, tastefully", and the operative
+ * word is the last one. This project has just finished establishing that
+ * **silence is the art direction**, with a measured budget in which the canyon
+ * floor at rest sits at 0.040 against 0.55 for a grounding. Anything laid on top
+ * of that damages the exact thing that makes a creak frightening.
+ *
+ * Three rules keep it honest, and they are the same rules as the rest of the
+ * file rather than mixing advice:
+ *
+ *  1. **It is tuned to the boat.** The root is the cabin's transverse air mode,
+ *     36.5 Hz, and the upper partial is the shell's ring frequency, 358.4 Hz.
+ *     Their ratio is 9.82, which is nearly but not quite three octaves and a
+ *     major third — so the drone is slightly inharmonic, because the hull is.
+ *     The score and the boat are in the same key instead of merely adjacent.
+ *  2. **It is driven by state, not by a timeline.** Depth, loading rate, scrubber
+ *     remaining, distance from home. It is dramaturgy, computed the way the
+ *     palette and the noise floor are computed.
+ *  3. **It gets out of the way of every instrument**, by two separate mechanisms
+ *     that were one in the first draft and should never have been. A busy hull
+ *     *crowds* it down smoothly, because a creak three times a second is already
+ *     doing the work; a genuinely large transient — a grounding, the alarm —
+ *     ducks it sharply, because those are information. An ordinary creak does
+ *     neither: it is ambience, not an announcement.
+ *
+ * `tools/dyn.mjs` asserts that the quietest creak still stands 6 dB clear of
+ * everything continuous. Six rather than ten because an onset transient against a
+ * steady drone is detectable far below equal-level masking — and because the
+ * ambient bed alone already leaves only eight. If that check fails the answer is
+ * to lower this ceiling, not to raise the creak.
+ */
+export const SCORE = {
+  /* Taken from the two owners rather than typed in. If the beam of the boat ever
+   * changes, the score retunes with it — which is the entire claim being made. */
+  root: CABIN_MODES.transverse,
+  ring: SHELL_RING,
+  floor: 0.010,        // at rest, in the shallows, nothing wrong
+  ceiling: 0.028,      // descending, low on scrubber, far from home
+  rise: 14.0,          // s. Tension arrives slowly or it is a jump scare
+  fall: 22.0,          // s. And leaves more slowly still
+  duckTo: 0.26,        // multiplier under a big transient
+  duckHold: 0.9,       // s to recover
+  duckAbove: 0.30,     // event level that counts as a big transient
+  /* How far a talking hull pushes the score down, and it is set by measurement.
+   *
+   * Raising this from 0.55 fixed the descent, where the hull creaks three times a
+   * second — but the margin did not move, because the worst case is not the noisy
+   * moment. It is the quiet one *just after*: the boat touches down, the loading
+   * rate collapses, the hull stops talking and the crowd term opens back up — and
+   * the drone is still near the top of its range because it falls with a 22 s
+   * constant. Twenty seconds of the score at full level over a silent hull, which
+   * is exactly when a creak has to be heard.
+   *
+   * **The worst masking is not under the loudest sound, it is in the gap after
+   * it,** because the two have different time constants. That is what the ceiling
+   * below had to pay for; this term still earns its keep during the descent. */
+  crowd: 0.72,
+};
+
 /* ------------------------------------------------------- the judgement calls
  *
  * Three numbers in this file are not derived from anything. They are here,
@@ -301,14 +392,20 @@ const ART = {
  *   machinery idling, at the helm       0.020
  *   machinery idling, in the plant      0.075
  *   machinery full ahead, in the plant  0.28
- *   one groan at 400 m                  0.10 to 0.22 peak
+ *   the score, at rest on the floor     0.014
+ *   the score, at its worst             0.025
+ *   one groan at 400 m                  0.14 to 0.22 peak
+ *   the pinger, alongside               0.075 peak
+ *   breathing, panting                  0.05 to 0.115 peak
  *   ballast blow, mid-transfer          0.34 peak
  *   grounding                           0.55 peak
  *
  * The order matters more than the values: a grounding is the loudest thing in
  * the game, a blow is next, and the floor at rest is fifteen times quieter than
- * either — fifteen decibels under the quietest creak. A sound is only
- * frightening against silence, so this table is a gate, not a note.
+ * either. A sound is only frightening against silence, so this table is a gate,
+ * not a note — and the gate is enforced. `tools/dyn.mjs --only score` measures
+ * the quietest creak against everything continuous at depth and fails below 6 dB;
+ * it currently reads 6.5.
  */
 export const BUDGET = {
   bedLow: 0.018, bedHiss: 0.055,
@@ -351,6 +448,11 @@ export class Acoustics {
     this.creakClock = 0;       // seconds until the next event
     this.thudArmed = 0;        // last contact value, for edge detection
     this.t = 0;
+    this.pingClock = 0;        // s until the next ping from the trunk
+    this.breathClock = 0;      // s until the next half-cycle
+    this.breathIn = true;
+    this.tension = 0;          // 0..1, smoothed. What the score is about
+    this.duck = 1;             // 1 open, SCORE.duckTo while an instrument speaks
 
     /** Impulses to fire this tick. Consumed and cleared by the engine. */
     this.events = [];
@@ -361,6 +463,7 @@ export class Acoustics {
       machGain: 0, machBlade: 0, machHum: MOTOR.hum, machRough: 0, rpm: 0,
       balGain: 0, balBubble: 0, balBlow: 0,
       scrape: 0,
+      alarmGain: 0, scoreGain: 0, scoreRoot: SCORE.root, tension: 0,
       inside: 1, tilt: EAR.cabinTilt, spread: 0, rt: EAR.cabinRT,
       master: BUDGET.master,
     };
@@ -478,6 +581,17 @@ export class Acoustics {
     // --- creak. The one voice that is a point process rather than a level.
     this._creak(dt, P, descending);
 
+    // --- the excursion: the way home, the lungs, and the warning.
+    this._excursion(dt, s);
+
+    /* --- the score, last, because it has to know what everything else did.
+     *
+     * `duck` is pulled down by any event fired this tick and by the alarm. It is
+     * checked after `_creak` and `_excursion` for that reason: a score that ducks
+     * one frame late is a score that steps on the front of a creak, which is the
+     * only part of a creak that carries. */
+    this._score(dt, s);
+
     // --- the ear itself
     this.v.inside = ins;
     this.v.tilt = EAR.waterTilt + (EAR.cabinTilt - EAR.waterTilt) * ins;
@@ -514,7 +628,11 @@ export class Acoustics {
      * the canyon is 425, so a linear law would make the whole game inaudible
      * to make one unreachable depth loud. Normalised at 400 m. */
     const strain = Math.pow(P / pressureAt(400), 0.35);
-    const level = clamp(strain, 0.12, 1.6) * BUDGET.creak * (0.45 + 0.55 * this.rand());
+    /* The random spread used to reach down to 0.45, which put the quietest
+     * creak at 0.099 — only 8 dB over an ambient bed of 0.040, before a score
+     * existed to eat into that. Narrowed, because a creak that has to be
+     * strained for is not doing its job. */
+    const level = clamp(strain, 0.12, 1.6) * BUDGET.creak * (0.62 + 0.38 * this.rand());
 
     /* Which family gets the energy. Groans on the way down, snaps on the way
      * up, with enough overlap that it is a tendency rather than a tell. */
@@ -531,6 +649,135 @@ export class Acoustics {
       decay: mode.decay * (0.7 + 0.6 * this.rand()),
       family: mode.family,
     });
+  }
+
+  /**
+   * Outside the hull: the pinger, the breathing and the scrubber alarm.
+   *
+   * All three are gated on being outside rather than on a mode, and all three go
+   * quiet aboard — the pinger because you have arrived, the breathing because you
+   * are off the loop and on cabin air, the alarm because the canister is being
+   * swapped.
+   */
+  _excursion(dt, s) {
+    const out = 1 - this.inside;
+    if (out < 0.02) {
+      this.v.alarmGain += (0 - this.v.alarmGain) * Math.min(1, dt * 3);
+      this.pingClock = 0;
+      return;
+    }
+
+    /* The pinger. Interval falls linearly with range and saturates, so the rate
+     * is the reading: three seconds apart means you are a long way out, four a
+     * second means you are at the hatch. */
+    const range = Math.max(0, s.boatRange ?? 0);
+    const k = clamp(range / PINGER.range, 0, 1);
+    const interval = PINGER.near + (PINGER.far - PINGER.near) * k;
+    this.pingClock -= dt;
+    if (this.pingClock <= 0) {
+      this.pingClock += interval;
+      this.events.push({
+        kind: 'ping', f: PINGER.f,
+        // Attenuated with range, but never to nothing: it is a beacon, and a
+        // beacon you cannot hear at the edge of its useful range is furniture.
+        level: PINGER.level * out * (0.35 + 0.65 * (1 - k)),
+      });
+    }
+
+    /* Breathing, at whatever rate the body has settled on. `life.js` owns that
+     * number: it rises with exertion and rises again with retained CO2, which is
+     * why the first sign of a spent canister is that you cannot stop panting. */
+    const bpm = Math.max(4, s.breath ?? 12);
+    this.breathClock -= dt;
+    if (this.breathClock <= 0) {
+      // Two halves per breath, and exhalation is the longer one.
+      const cycle = 60 / bpm;
+      this.breathClock += this.breathIn ? cycle * 0.42 : cycle * 0.58;
+      this.events.push({
+        kind: 'breath',
+        inhale: this.breathIn,
+        f: this.breathIn ? BREATH.inhale : BREATH.exhale,
+        // Panting is shallower as well as faster, so it does not just get louder.
+        level: BREATH.level * out * clamp(1.25 - bpm / 60, 0.45, 1.0),
+      });
+      this.breathIn = !this.breathIn;
+    }
+
+    /* The scrubber alarm, as beeps rather than as a level.
+     *
+     * A tone held open by a continuous gain needs an LFO in the graph to become a
+     * beep, and a beep is what a warning is. Emitting events instead keeps it the
+     * same shape as the creak and the ping — which means `tools/dyn.mjs` counts
+     * them, and the score's duck sees them without a special case. Rate carries
+     * the urgency: one a second while there is time, two and a half when there is
+     * not, which is the same trick the pinger uses on distance. */
+    const al = clamp(s.alarm ?? 0, 0, 1);
+    this.v.alarmGain = ALARM.level * al * out;
+    if (al > 0.02) {
+      const rate = s.phase === 'critical' || s.phase === 'blackout' ? 2.5 : 1.0;
+      this.beepClock = (this.beepClock ?? 0) - dt * rate;
+      if (this.beepClock <= 0) {
+        this.beepClock += 1;
+        this.events.push({ kind: 'beep', f: ALARM.f, level: ALARM.level * al * out });
+      }
+    } else {
+      this.beepClock = 0;
+    }
+  }
+
+  /**
+   * The score. A level and a root, and nothing else — `audio.js` owns the timbre.
+   *
+   * Tension is the maximum of four independent pressures rather than their sum,
+   * because they are alternatives rather than accumulations: being deep is
+   * frightening, and so is being low on scrubber, and a player who is both should
+   * not get a score twice as loud as either.
+   */
+  _score(dt, s) {
+    const depth = Math.max(0, s.depth ?? 0);
+    /* Depth is weighted low on purpose. Being deep is a *constant*, and a
+     * constant is not tension — driven off altitude alone the score would sit at
+     * three quarters of its ceiling for as long as the player stayed on the
+     * bottom, which is the definition of wallpaper. The three terms that can
+     * actually change are the ones allowed to reach the top: going down right
+     * now, running out of sorbent, and being a long way from the way in. */
+    const want = Math.max(
+      clamp(depth / 420, 0, 1) * 0.35,            // simply being down here
+      clamp(Math.abs(this.dPdt) / 0.18, 0, 1),    // going further, actively
+      clamp(1 - (s.scrubber ?? 1), 0, 1),         // running out
+      clamp(((s.boatRange ?? 0) - 25) / 90, 0, 1) * (1 - this.inside),  // lost
+    );
+    // Asymmetric, like the eye's adaptation and for the same reason: dread should
+    // arrive slowly and leave more slowly than it arrived.
+    this.tension = approach(this.tension, want, want > this.tension ? SCORE.rise : SCORE.fall, dt);
+
+    /* Two different mechanisms, and the first draft had only the second.
+     *
+     * Ducking on *every* event was perverse: during a descent the hull creaks
+     * three times a second, so the score sat permanently at a quarter of its
+     * level — it vanished exactly when the game got frightening, which is the
+     * opposite of what a score is for. Measured 0.007 against a ceiling of 0.052.
+     *
+     * So the two jobs are separated. A hull that is talking *crowds* the score out
+     * smoothly, because the creak is already doing the work and the drone is only
+     * there to fill silence. And a genuinely big transient — a grounding, a large
+     * creak, the scrubber alarm — ducks it sharply, because those are information
+     * and the score is not. A small creak now does nothing at all, which is
+     * correct: it is ambience, not an announcement. */
+    const busy = clamp(this.creakRate / 2.0, 0, 1);
+    const crowded = 1 - SCORE.crowd * busy;
+
+    const loudest = this.events.reduce((m, e) => Math.max(m, e.level || 0), 0);
+    const big = loudest >= SCORE.duckAbove || this.events.some((e) => e.kind === 'beep');
+    const target = big ? SCORE.duckTo : 1;
+    this.duck = target < this.duck
+      ? target                                       // duck instantly
+      : approach(this.duck, 1, SCORE.duckHold, dt);  // recover over most of a second
+
+    this.v.tension = this.tension;
+    this.v.scoreRoot = SCORE.root;
+    this.v.scoreGain = (SCORE.floor + (SCORE.ceiling - SCORE.floor) * this.tension)
+      * this.duck * crowded * (s.music === false ? 0 : 1);
   }
 
   /** Creaks per second at the current loading rate. For the F3 panel. */

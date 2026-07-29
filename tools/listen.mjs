@@ -37,15 +37,17 @@ const scene = arg('scene', 'descent');
  * drive the identical sequence and their numbers are comparable. */
 const SCENES = {
   // Sitting on the floor doing nothing. The title, and the quietest case.
-  silence: () => ({ depth: 423, aboard: true, earZ: 6.9, throttle: 0, ballast: 0.5, ballastCmd: 0.5, way: 0, grounded: true, contact: 0 }),
+  silence: () => ({ depth: 423, aboard: true, earZ: 6.9, throttle: 0, ballast: 0.5, ballastCmd: 0.5, way: 0, grounded: true, contact: 0, breath: 12, alarm: 0, phase: 'ok', boatRange: 0, scrubber: 1 }),
   // Falling. Loading rate up, so the hull talks.
-  descent: (t) => ({ depth: 120 + t * 1.81, aboard: true, earZ: 6.9, throttle: 0, ballast: 1, ballastCmd: 1, way: 0, grounded: false, contact: 0 }),
+  descent: (t) => ({ depth: 120 + t * 1.81, aboard: true, earZ: 6.9, throttle: 0, ballast: 1, ballastCmd: 1, way: 0, grounded: false, contact: 0, breath: 12, alarm: 0, phase: 'ok', boatRange: 0, scrubber: 1 }),
   // Full ahead in the machinery space, which is the loudest sustained case.
-  plant: () => ({ depth: 300, aboard: true, earZ: -3.95, throttle: 1, ballast: 0.5, ballastCmd: 0.5, way: 4.5, grounded: false, contact: 0 }),
+  plant: () => ({ depth: 300, aboard: true, earZ: -3.95, throttle: 1, ballast: 0.5, ballastCmd: 0.5, way: 4.5, grounded: false, contact: 0, breath: 12, alarm: 0, phase: 'ok', boatRange: 0, scrubber: 1 }),
   // Blowing. One press, then the tank works for half a minute on its own.
-  blow: (t) => ({ depth: 400, aboard: true, earZ: 6.9, throttle: 0, ballast: 0.5, ballastCmd: t < 1.2 ? 0.5 - t * 0.42 : 0.0, way: 0, grounded: false, contact: 0 }),
+  blow: (t) => ({ depth: 400, aboard: true, earZ: 6.9, throttle: 0, ballast: 0.5, ballastCmd: t < 1.2 ? 0.5 - t * 0.42 : 0.0, way: 0, grounded: false, contact: 0, breath: 12, alarm: 0, phase: 'ok', boatRange: 0, scrubber: 1 }),
   // Outside the hull: quieter, darker, and with no idea where anything is.
-  water: () => ({ depth: 400, aboard: false, earZ: 24, throttle: 0.4, ballast: 0.5, ballastCmd: 0.5, way: 2, grounded: false, contact: 0 }),
+  // Outside the hull, a long way from the trunk, breathing hard and low on
+  // sorbent. The pinger, the lungs and the alarm all live in this one.
+  water: (t) => ({ depth: 400, aboard: false, earZ: 24, throttle: 0.4, ballast: 0.5, ballastCmd: 0.5, way: 2, grounded: false, contact: 0, breath: 26 + t, alarm: 1, phase: 'critical', boatRange: 78, scrubber: 0.06 }),
 };
 
 const bands = [31.25, 62.5, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
@@ -103,10 +105,20 @@ function stubContext(sampleRate = 48000) {
       attack: param('attack', 0.003), release: param('release', 0.25),
     }),
     createConvolver: () => node('convolver', { normalize: true, buffer: null }),
-    createOscillator: () => node('osc', {
-      type: 'sine', frequency: param('oscFreq', 440), detune: param('detune', 0),
-      start() {}, stop() {}, setPeriodicWave() {},
-    }),
+    /* Oscillators end too. The first version of this stub made start and stop
+     * no-ops, so `onended` never fired for the pinger or the alarm and sixteen
+     * voices "leaked" — in the stub only. A leak checker that cannot see half the
+     * voices is worse than none, because it reports a clean run. */
+    createOscillator() {
+      const ctx = this;
+      return node('osc', {
+        type: 'sine', frequency: param('oscFreq', 440), detune: param('detune', 0),
+        onended: null,
+        start(when) { this._t0 = when || 0; },
+        stop(when) { ctx._pending.push({ src: this, end: when || 0 }); },
+        setPeriodicWave() {},
+      });
+    },
     /* One-shot sources have to *end*, or the leak this is meant to catch is the
      * one thing it cannot see. `_tick` fires the due callbacks, so the
      * disconnect path in `_creak` and `_thud` is exercised and the voice counter
@@ -239,11 +251,13 @@ async function renderMode() {
      * explicit clock, then render once. */
     const DT = 1 / 60;
     const scenes = {
-      silence: () => ({ depth: 423, aboard: true, earZ: 6.9, throttle: 0, ballast: 0.5, ballastCmd: 0.5, way: 0, grounded: true, contact: 0 }),
-      descent: (t) => ({ depth: 120 + t * 1.81, aboard: true, earZ: 6.9, throttle: 0, ballast: 1, ballastCmd: 1, way: 0, grounded: false, contact: 0 }),
-      plant: () => ({ depth: 300, aboard: true, earZ: -3.95, throttle: 1, ballast: 0.5, ballastCmd: 0.5, way: 4.5, grounded: false, contact: 0 }),
-      blow: (t) => ({ depth: 400, aboard: true, earZ: 6.9, throttle: 0, ballast: 0.5, ballastCmd: t < 1.2 ? 0.5 - t * 0.42 : 0.0, way: 0, grounded: false, contact: 0 }),
-      water: () => ({ depth: 400, aboard: false, earZ: 24, throttle: 0.4, ballast: 0.5, ballastCmd: 0.5, way: 2, grounded: false, contact: 0 }),
+      silence: () => ({ depth: 423, aboard: true, earZ: 6.9, throttle: 0, ballast: 0.5, ballastCmd: 0.5, way: 0, grounded: true, contact: 0, breath: 12, alarm: 0, phase: 'ok', boatRange: 0, scrubber: 1 }),
+      descent: (t) => ({ depth: 120 + t * 1.81, aboard: true, earZ: 6.9, throttle: 0, ballast: 1, ballastCmd: 1, way: 0, grounded: false, contact: 0, breath: 12, alarm: 0, phase: 'ok', boatRange: 0, scrubber: 1 }),
+      plant: () => ({ depth: 300, aboard: true, earZ: -3.95, throttle: 1, ballast: 0.5, ballastCmd: 0.5, way: 4.5, grounded: false, contact: 0, breath: 12, alarm: 0, phase: 'ok', boatRange: 0, scrubber: 1 }),
+      blow: (t) => ({ depth: 400, aboard: true, earZ: 6.9, throttle: 0, ballast: 0.5, ballastCmd: t < 1.2 ? 0.5 - t * 0.42 : 0.0, way: 0, grounded: false, contact: 0, breath: 12, alarm: 0, phase: 'ok', boatRange: 0, scrubber: 1 }),
+      // Outside the hull, a long way from the trunk, breathing hard and low on
+  // sorbent. The pinger, the lungs and the alarm all live in this one.
+  water: (t) => ({ depth: 400, aboard: false, earZ: 24, throttle: 0.4, ballast: 0.5, ballastCmd: 0.5, way: 2, grounded: false, contact: 0, breath: 26 + t, alarm: 1, phase: 'critical', boatRange: 78, scrubber: 0.06 }),
     };
     const fn = scenes[sceneName] || scenes.descent;
     let clock = 0;

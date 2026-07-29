@@ -95,6 +95,42 @@
     color:rgba(225,248,255,.98);
   }
   #prompt[hidden] { display:none; }
+
+  /* Outside the hull. One block, and it only exists while you are out there —
+     the boat has instruments, a swimmer has a wrist unit. */
+  #exo {
+    position:fixed; left:50%; top:22px; transform:translateX(-50%); z-index:6;
+    display:flex; align-items:center; gap:22px; pointer-events:none;
+    padding:10px 20px; border:1px solid rgba(159,211,221,.18); border-radius:2px;
+    background:rgba(4,12,16,.34);
+    font:400 11px/1 ui-monospace,monospace; letter-spacing:.2em;
+    color:rgba(180,225,235,.78); text-transform:uppercase;
+    text-shadow:0 1px 10px rgba(0,0,0,.9);
+  }
+  #exo[hidden] { display:none; }
+  #exo .lab { font-size:9px; opacity:.45; letter-spacing:.26em; }
+  #exo b { font-weight:400; font-size:15px; letter-spacing:.08em;
+           color:rgba(205,240,248,.95); }
+  /* The needle. A bearing is the one thing that stops you being lost, and an
+     arrow is read faster than three digits. */
+  #exoArrow { width:26px; height:26px; flex:0 0 26px; transition:transform .08s linear; }
+  #exoArrow path { fill:rgba(215,245,252,.92); }
+  #exoScrub.warn b { color:rgba(255,196,120,.98); }
+  #exoScrub.crit b { color:rgba(255,138,110,1); }
+
+  /* Hypercapnia. A vignette rather than a colour cast, because what actually
+     narrows is the field of view. */
+  #veil {
+    position:fixed; inset:0; z-index:7; pointer-events:none; opacity:0;
+    background:radial-gradient(ellipse at center,
+      rgba(0,0,0,0) 26%, rgba(2,6,8,.72) 62%, rgba(0,2,3,.97) 88%);
+  }
+  /* Blacking out, and coming round. Separate from the vignette so the fade can
+     finish over a picture that is already closed in. */
+  #fade {
+    position:fixed; inset:0; z-index:8; pointer-events:none; opacity:0;
+    background:#010507;
+  }
 </style>
 </head>
 <body>
@@ -118,6 +154,22 @@
      no prompt, standing next to a pilot's seat looks exactly like standing next
      to a wall, and the player has no way to learn that E does anything. -->
 <div id="prompt" hidden><kbd>E</kbd><span id="promptText"></span></div>
+
+<!-- The wrist unit. Only while outside the hull: a bearing to the trunk, the
+     range to it, and how much of the canister is left. Visibility is 21 m and
+     the ocean is featureless, so without the bearing the boat is gone. -->
+<div id="exo" hidden>
+  <svg id="exoArrow" viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M12 1.6 L19 21 L12 16.6 L5 21 Z"/>
+  </svg>
+  <div><span class="lab">Boat</span><br><b id="exoRange">0</b> m</div>
+  <div><span class="lab">Bearing</span><br><b id="exoBrg">000</b>&deg;</div>
+  <div id="exoScrub"><span class="lab">Scrubber</span><br><b id="exoPct">100</b>% ·
+    <b id="exoMin">0.0</b> min</div>
+</div>
+
+<div id="veil"></div>
+<div id="fade"></div>
 
 <div id="boot">
   <h1>The Deep Silence</h1>

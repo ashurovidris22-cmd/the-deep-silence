@@ -7,11 +7,12 @@ Visual target: the look of **SOMA**. Tension target: the systemic dread of
 **Barotrauma** — a thin metal hull, a finite power budget, and pressure that only
 ever increases. Not Barotrauma's art style.
 
-**Status: she can be driven, walked around inside, and heard.** The optics, the
-seabed, the flora, the post chain, a furnished eighteen-metre pressure hull, the
-vessel dynamics and the sound layer all exist. The inhabitants do not yet — and
-nothing yet asks the player to go down, which is the largest gap and it is a
-design gap rather than a rendering one.
+**Status: she can be driven, walked around inside, heard, and left.** The optics,
+the seabed, the flora, the post chain, a furnished eighteen-metre pressure hull,
+the vessel dynamics, the sound layer and a timed excursion outside the hull all
+exist. The inhabitants do not yet — and nothing yet asks the player to go *down*,
+which is the largest remaining gap and it is a design gap rather than a rendering
+one.
 
 ## Why the water is not art-directed
 
@@ -48,6 +49,7 @@ olive while anything further has had the red taken out of it.
 index.html          entry point; reads state from URL params
 src/hull.js         the five principal dimensions, and no imports at all
 src/jerlov.js       seawater optics constants, depth zones, pressure
+src/life.js         the suit's CO2 scrubber — why you come back
 src/acoustics.js    underwater acoustics, and the state-to-sound map. Pure maths
 src/audio.js        the synthesiser: owns the AudioContext, decides nothing
 src/glsl.js         shared GLSL: noise, the water model, phase function
@@ -77,6 +79,7 @@ Take the seat at the bow with **E**, and then:
 | `X` | all stop |
 | `E` | stand up. She keeps whatever way you left on |
 | `M` | mute |
+| `V` | at the hatch, go outside. Within five metres of the trunk, come back in |
 
 Three things make her a vessel rather than a flying box. Vertical is ballast,
 not thrust, so every depth command is committed long before it answers. A rudder
@@ -124,6 +127,52 @@ takes the top off, and interaural time difference shrinks by the sound-speed
 ratio of 4.4, so localisation fails. Outside the boat everything is loud, close,
 and coming from nowhere. That is true, and it is worse than muffled.
 
+## Why the air supply is a scrubber and not a tank
+
+The obvious version of "add oxygen" does not survive contact with the depth. A
+demand regulator delivers gas at ambient pressure, so consumption by mass scales
+with absolute pressure: at 43 atmospheres on the canyon floor, a cylinder good for
+an hour at the surface lasts eighty-three seconds. Open circuit is not a thing
+that works down here, which is exactly why real deep work is closed-circuit.
+
+On a rebreather the loop is recycled, so oxygen is consumed *metabolically* and is
+nearly independent of depth. What runs out is the sorbent that takes the carbon
+dioxide back out — so the readout is scrubber life, the failure mode is hypercapnia
+rather than suffocation, and the reason to come back is that the canister in the
+suit is an emergency one rather than a working rig.
+
+The duration is derived, not balanced: 0.25 kg of Sofnolime at a practical
+120 litres of CO₂ per kg, halved because sorbent kinetics fall off badly in 4 °C
+water. Fifteen litres usable, against a metabolic output of 0.26 l/min floating
+and 1.6 l/min at a sprint. That gives 59 minutes if you hang still and nine if you
+thrash, and **moving carefully is worth more than any other decision available out
+there** — which is the right pressure for this game and it came out of the
+physiology rather than out of a spreadsheet.
+
+The pleasing part is that the boat was already built for it. The machinery space
+has had a CO₂ scrubber and an "O2" valve tag in it since the fit-out pass, put
+there as set dressing. The mechanic connected to objects that already existed
+instead of arriving with its own furniture.
+
+## Why the way home is a light and a sound, and not two of either
+
+Getting lost outside was immediate: visibility is twenty-one metres, the boat was
+unlit, and eight strokes away every direction looks the same. The fix is split
+across two senses, and the split is not a design flourish — it is the acoustics
+model refusing to lie.
+
+Outside the hull, localisation is gone. Interaural time difference is head width
+over sound speed, and sound speed is 4.4× higher in water, so the cue the brain
+uses for direction shrinks by 4.4 and stops working. A sound out there can honestly
+tell you *how far* and cannot honestly tell you *which way*.
+
+So the amber strobe on the conning trunk carries the direction, and a 3.1 kHz
+pinger carries the range by repetition rate alone — 3.1 seconds apart at 130 m,
+a quarter of a second alongside. A Geiger counter, which is the most legible
+distance signal ever built and needs no interface at all. The strobe marks the
+*trunk* rather than the middle of the hull, because what a lost swimmer needs is
+not the boat, it is the way in.
+
 ## Why the canyon floor has no plants on it
 
 The brief was "vegetation on the seabed", and on the floor of a 440 m canyon
@@ -170,7 +219,8 @@ python3 -m http.server 8123
 ```
 
 URL parameters: `pose`, `depth`, `lamp`, `hud`, `stats`, `dpr`, `vsteps`,
-`vscale`, `auto`.
+`vscale`, `auto`, `sound`, `music`. `?music=0` keeps every instrument and removes
+only the drone, which is a different request from muting.
 
 ## The harness
 
@@ -253,6 +303,26 @@ Kept because each one cost real time and each will recur.
   because a hull aground on a slope never quite stops. Inaudible, unfindable, and
   exactly how a synthesiser acquires a permanent whisper. Sliding friction has a
   breakaway threshold, so below it the right level is *exactly* zero.
+- **The vessel and the camera have opposite handedness, and the rudder was never
+  reconciled with it.** `Vessel` builds `forward = (sin y, 0, +cos y)`, so positive
+  yaw is counter-clockwise seen from above; the camera's positive yaw is clockwise.
+  `Pilot.apply()` knew and composed the two with a minus. Nothing checked the
+  control: `rudder = +1`, called starboard everywhere, swung the bow to the pilot's
+  left — measured `swing · screenRight = -0.986`. The compass ran backwards for the
+  same reason, and the console gauge was drawn correctly all along while being lied
+  to. **It survived a whole piloting pass because a rudder does nothing at rest.**
+- **A gate on the prompt is not a gate on the action.** Coming back aboard was
+  unconditional from anywhere in the ocean while the on-screen prompt appeared at
+  nine metres, so the rule shown and the rule enforced were different and the
+  generous one won silently. Harmless until the scrubber gave the outside stakes,
+  at which point a swimmer 300 m out could teleport home and every derived number
+  in the life-support model became decoration.
+- **The worst masking is in the gap after a loud sound, not under it.** The score's
+  ceiling is set by the twenty seconds *after* the boat touches down: the hull stops
+  creaking in about a second, the term that lets a busy hull crowd the drone out
+  opens straight back up, and the drone itself is still near the top of its range
+  because it falls with a 22 s constant. Two envelopes with different time
+  constants overlap worst during the decay.
 
 ## Licence
 

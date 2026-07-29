@@ -33,7 +33,7 @@
  */
 
 import { rng, SEEDS } from './rng.js';
-import { Acoustics, SHELL_RING, CABIN_MODES, EAR, MOTOR } from './acoustics.js';
+import { Acoustics, SHELL_RING, CABIN_MODES, EAR, MOTOR, SCORE } from './acoustics.js';
 
 /* Smooth a parameter toward a value. Assigning `.value` every frame is a
  * staircase and audibly zippers on anything tonal; `setTargetAtTime` is the
@@ -163,6 +163,56 @@ export class Audio {
     this._buildMachine(ctx, noise);
     this._buildBallast(ctx, noise);
     this._buildScrape(ctx, noise);
+    this._buildScore(ctx);
+  }
+
+  /* --------------------------------------------------------------- the score
+   *
+   * Three partials on the boat's own frequencies, and the tuning is the argument:
+   * the root is the cabin's transverse air mode and the top is the shell's ring
+   * frequency, so their ratio is 9.82 rather than a round 8 or 10. That near-miss
+   * is the whole character — a drone built on exact octaves sounds like a synth
+   * pad, and one built on a hull sounds like the hull.
+   *
+   * The middle partial is detuned by three cents against the root's second
+   * harmonic, which beats once every eleven seconds. Slow enough not to read as
+   * vibrato, fast enough that the drone never sits perfectly still.
+   *
+   * It goes to `direct` rather than through `bus`, so it is not fed to the
+   * convolvers and does not get the ear model applied. The score is not in the
+   * water with the player: reverberating it would make the non-diegetic layer
+   * respond to the hatch, which is the moment the trick becomes visible.
+   */
+  _buildScore(ctx) {
+    this.scoreG = ctx.createGain();
+    this.scoreG.gain.value = 0;
+
+    /* One gentle lowpass over the lot, opening with tension. Brightness is how a
+     * drone communicates rising pressure without getting louder — which matters
+     * here, because the level is capped hard by the budget. */
+    this.scoreF = ctx.createBiquadFilter();
+    this.scoreF.type = 'lowpass';
+    this.scoreF.frequency.value = 180;
+    this.scoreF.Q.value = 0.9;
+    this.scoreG.connect(this.scoreF).connect(this.direct);
+
+    const root = SCORE.root;
+    const partials = [
+      { f: root, type: 'sine', g: 1.00 },
+      { f: root * 2 * 1.0017, type: 'sine', g: 0.42 },   // +3 cents: an 11 s beat
+      { f: SCORE.ring, type: 'triangle', g: 0.055 },
+    ];
+    this.scoreOsc = [];
+    for (const p of partials) {
+      const o = ctx.createOscillator();
+      o.type = p.type;
+      o.frequency.value = p.f;
+      const g = ctx.createGain();
+      g.gain.value = p.g;
+      o.connect(g).connect(this.scoreG);
+      o.start();
+      this.scoreOsc.push(o);
+    }
   }
 
   /* --------------------------------------------------------------- the bed
@@ -386,14 +436,23 @@ export class Audio {
 
       ramp(this.scrapeG.gain, v.scrape, t);
 
+      /* The score. Level is already ducked by the mapping, so it is followed
+       * quickly — a slow ramp here would undo the ducking, which is the one thing
+       * this voice must get right. Brightness follows tension more slowly. */
+      ramp(this.scoreG.gain, v.scoreGain, t, 0.05);
+      ramp(this.scoreF.frequency, 130 + 460 * v.tension, t, 1.2);
+
       for (const e of this.acoustics.events) {
         if (e.kind === 'creak') this._creak(t, e);
         else if (e.kind === 'thud') this._thud(t, e);
+        else if (e.kind === 'ping') this._ping(t, e);
+        else if (e.kind === 'breath') this._breath(t, e);
+        else if (e.kind === 'beep') this._beep(t, e);
         this._events++;
       }
 
       this.peak = Math.max(this.peak * Math.exp(-dt * 1.5),
-        v.bedLow + v.bedHiss + v.machGain + v.balGain + v.scrape);
+        v.bedLow + v.bedHiss + v.machGain + v.balGain + v.scrape + v.scoreGain);
     } catch (e) {
       this.state = 'failed';
       this.error = String(e && e.message ? e.message : e);
@@ -480,6 +539,81 @@ export class Audio {
     };
   }
 
+  /**
+   * The trunk's pinger. A clean tone with a hard onset, because the *rate* is the
+   * message and a soft attack blurs the interval the ear is trying to time.
+   */
+  _ping(t, e) {
+    const ctx = this.ctx;
+    const o = ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.value = e.f;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(e.level, t + 0.002);
+    g.gain.exponentialRampToValueAtTime(1e-4, t + 0.13);
+    o.connect(g).connect(this.bus);
+    o.start(t);
+    o.stop(t + 0.16);
+    this.voices++;
+    o.onended = () => { this.voices--; try { g.disconnect(); } catch { /* gone */ } };
+  }
+
+  /**
+   * One half of a breath. Filtered noise with a slow swell, and inhalation is
+   * brighter and shorter than exhalation because the counterlung is on the other
+   * side of it.
+   *
+   * This is the cheapest frightening sound in the game and it costs three nodes.
+   */
+  _breath(t, e) {
+    const ctx = this.ctx;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise;
+    const dur = e.inhale ? 0.5 : 0.72;
+    const off = (this._events * 0.317) % (this.noise.duration - 1.2);
+
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.setValueAtTime(e.f * (e.inhale ? 0.7 : 1.25), t);
+    // The formant slides through the breath, which is what makes it a throat.
+    bp.frequency.linearRampToValueAtTime(e.f * (e.inhale ? 1.35 : 0.72), t + dur);
+    bp.Q.value = 1.6;
+
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(e.level, t + dur * (e.inhale ? 0.35 : 0.22));
+    g.gain.exponentialRampToValueAtTime(1e-4, t + dur);
+
+    src.connect(bp).connect(g).connect(this.bus);
+    src.start(t, off, dur + 0.05);
+    this.voices++;
+    src.onended = () => { this.voices--; try { g.disconnect(); } catch { /* gone */ } };
+  }
+
+  /** The scrubber warning. Two short pips, so it cannot be heard as the pinger. */
+  _beep(t, e) {
+    const ctx = this.ctx;
+    for (const [i, off] of [[0, 0], [1, 0.11]]) {
+      const o = ctx.createOscillator();
+      o.type = 'square';
+      o.frequency.value = e.f * (i ? 1.0 : 1.0);
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass'; lp.frequency.value = 3400; lp.Q.value = 0.7;
+      const g = ctx.createGain();
+      const t0 = t + off;
+      g.gain.setValueAtTime(0, t0);
+      g.gain.linearRampToValueAtTime(e.level * 0.5, t0 + 0.004);
+      g.gain.setValueAtTime(e.level * 0.5, t0 + 0.055);
+      g.gain.exponentialRampToValueAtTime(1e-4, t0 + 0.08);
+      o.connect(lp).connect(g).connect(this.bus);
+      o.start(t0);
+      o.stop(t0 + 0.1);
+      this.voices++;
+      o.onended = () => { this.voices--; try { g.disconnect(); } catch { /* gone */ } };
+    }
+  }
+
   /** Toggle. Silence is a gain change, not a teardown — the graph stays warm. */
   mute(on = !this.muted) { this.muted = on; return this.muted; }
 
@@ -495,6 +629,7 @@ export class Audio {
     return `sound ${this.ctx.state}  ${this.muted ? 'MUTED' : `lvl ${this.peak.toFixed(3)}`}`
       + `  voices ${this.voices}  creak/s ${a.creakRate.toFixed(2)}`
       + `  rpm ${a.rpm.toFixed(0)}  blade ${a.v.machBlade.toFixed(0)}Hz`
-      + `  in ${a.v.inside.toFixed(2)}`;
+      + `  in ${a.v.inside.toFixed(2)}`
+      + `  score ${a.v.scoreGain.toFixed(3)} tens ${a.tension.toFixed(2)} duck ${a.duck.toFixed(2)}`;
   }
 }

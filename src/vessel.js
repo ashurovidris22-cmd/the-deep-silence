@@ -179,7 +179,27 @@ export class Vessel {
      * Stopped, the wheel does nothing at all. This is the single detail that
      * separates piloting from driving, and it is one clamp. */
     const way = Math.min(1, Math.abs(vf) / STEER_SPEED) * Math.sign(vf || 1);
-    this.yawRate += this.rudder * RUDDER * way * dt;
+    /* Minus, and it is the whole bug a player reported as "steering is inverted".
+     *
+     * This class builds its heading as forward = (sin y, 0, +cos y), so positive
+     * yaw carries the bow from +Z toward +X — which, seen from above with +X to
+     * the right, is *counter*-clockwise. The camera builds the opposite basis,
+     * dir = (sin y, 0, -cos y), where positive yaw is clockwise. `Pilot.apply()`
+     * already knows the two disagree and composes them with a minus, with ten
+     * lines of comment explaining why.
+     *
+     * Nothing ever reconciled the *control* with that. So `rudder = +1`, which
+     * every name in the file calls starboard, added positive yaw and swung the
+     * bow to the pilot's left. Measured at full ahead: swing . screenRight =
+     * -0.986. Not subtle, and invisible at rest, because a rudder does nothing
+     * at rest — which is exactly why it survived the piloting pass.
+     *
+     * Fixed here rather than by swapping the A and D keys in main.js, because
+     * `rudder` means "which way is the blade over" everywhere else and a control
+     * whose sign is a lie will be believed by the next person to use it. The
+     * geometry is untouched: forward(), toWorld(), toLocal() and applyTo() stay
+     * mutually consistent, so nothing about the composition moves. */
+    this.yawRate -= this.rudder * RUDDER * way * dt;
     this.yawRate *= Math.exp(-YAW_DRAG * dt);
     this.yaw += this.yawRate * dt;
     // Rudder springs amidships when nobody is holding it.
@@ -248,6 +268,19 @@ export class Vessel {
 
   /** Speed along the bow, signed. Positive is ahead. */
   get way() { return this.vel.dot(this.forward()); }
-  /** Heading in degrees, 0 = +Z, clockwise seen from above. */
-  get heading() { return ((this.yaw * 180 / Math.PI) % 360 + 360) % 360; }
+  /**
+   * Heading in degrees. 0 is +Z, and it counts up to starboard, like a compass.
+   *
+   * The old docstring said "clockwise seen from above" and the old body returned
+   * `yaw` directly, and both were wrong for the same reason the rudder was:
+   * positive yaw here is counter-clockwise. So a turn to starboard ran the
+   * needle *backwards* — measured, a screen-right turn took the readout from
+   * 0 to 279.7 degrees.
+   *
+   * Negated, which is one character and fixes three instruments at once: the F3
+   * line, and the compass on the console, whose dial was already drawn to rotate
+   * clockwise with a rising number and was therefore correct all along about a
+   * value that was lying to it.
+   */
+  get heading() { return ((-this.yaw * 180 / Math.PI) % 360 + 360) % 360; }
 }

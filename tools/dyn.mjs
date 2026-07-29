@@ -27,7 +27,13 @@ const THREE = await import('three');
 const { SEA_LEVEL, seabedHeight } = await import('../src/terrain.js');
 const { Vessel } = await import('../src/vessel.js');
 const { HELM } = await import('../src/hull.js');
+/* The real camera basis, imported rather than rewritten. A steering test that
+ * transcribes the convention it is testing proves only that two copies of a
+ * mistake agree — and this project has already had a strafe vector that was its
+ * own negative because someone wrote it out by hand. */
+const { headingDir, screenRight } = await import('../src/controls.js');
 const A = await import('../src/acoustics.js');
+const LIFE = await import('../src/life.js');
 const { Acoustics } = A;
 
 const DT = 1 / 60;                    // fixed. The whole reason this file exists.
@@ -47,13 +53,14 @@ function rig(depth0, x = 0, z = 0) {
   return { v, a: new Acoustics(), earZ: HELM.z, t: 0, fired: [] };
 }
 
-function step(r, dt = DT) {
+function step(r, dt = DT, extra = null) {
   r.v.update(dt, SEA_LEVEL - 8);
   const depth = Math.max(0.4, SEA_LEVEL - r.v.pos.y);
   r.a.update(dt, {
     depth, aboard: true, earZ: r.earZ,
     throttle: r.v.throttle, ballast: r.v.ballast, ballastCmd: r.v.ballastCmd,
     way: r.v.way, grounded: r.v.grounded, contact: r.v.contact, muted: false,
+    ...(extra || {}),
   });
   r.t += dt;
   for (const e of r.a.events) r.fired.push({ t: r.t, ...e });
@@ -61,7 +68,7 @@ function step(r, dt = DT) {
 }
 
 /** Sum of every continuous voice. The number the loudness budget is about. */
-const bedSum = (v) => v.bedLow + v.bedHiss + v.machGain + v.balGain + v.scrape;
+const bedSum = (v) => v.bedLow + v.bedHiss + v.machGain + v.balGain + v.scrape + v.scoreGain;
 
 /* ===================================================================== */
 function constants() {
@@ -105,6 +112,44 @@ function tank() {
   const verdict = Math.abs(tau - 8) < 1.2 ? 'AGREES with the stated intent'
     : `DISAGREES with the stated intent by ${(8 / tau).toFixed(1)}x`;
   console.log(`  verdict                   ${verdict}`);
+}
+
+/* ===================================================================== */
+function helm() {
+  hr('THE HELM  —  does the boat turn the way the pilot is facing?');
+  /* Reported by a player as "steering is inverted", and it was. Two signs from
+   * one handedness confusion, and both are asserted here so they cannot come
+   * back quietly: the rudder does nothing at rest, so nothing else was ever
+   * going to notice.
+   *
+   * The seated station aims from z = 6.25 toward z = 8.20, along hull +Z, which
+   * AIM() solves as local yaw 180. */
+  const localYaw = Math.atan2(0, -(8.20 - HELM.z + 0.65)) * 180 / Math.PI;
+  let pass = true;
+  console.log(`  helm station local yaw ${localYaw.toFixed(0)} deg, looking along hull +Z`);
+  for (const [label, rud, want] of [['D  starboard', +1, 'RIGHT'], ['A  port', -1, 'LEFT']]) {
+    const r = rig(200);
+    r.v.throttle = 1;
+    for (let i = 0; i < 60 * 25; i++) step(r);          // a rudder needs way
+    const bow0 = r.v.forward().clone();
+    const h0 = r.v.heading;
+    // Screen-right at the instant of the turn, from the real basis.
+    const right = screenRight(headingDir(localYaw * Math.PI / 180 - r.v.yaw, 0));
+    for (let i = 0; i < 60 * 6; i++) { r.v.rudder = rud; step(r); }
+    const onScreen = r.v.forward().clone().sub(bow0).dot(right);
+    const got = onScreen > 0 ? 'RIGHT' : 'LEFT';
+    // Signed compass delta, wrapped into +-180.
+    const dh = ((r.v.heading - h0 + 540) % 360) - 180;
+    const hOk = (rud > 0) === (dh > 0);
+    const ok = got === want && hOk;
+    pass = pass && ok;
+    console.log(`  ${label}   bow swings ${got.padEnd(5)} (want ${want.padEnd(5)})`
+      + `  dot ${onScreen.toFixed(3).padStart(7)}`
+      + `   heading ${h0.toFixed(0)} -> ${r.v.heading.toFixed(0)} (${dh > 0 ? '+' : ''}${dh.toFixed(0)})`
+      + `   ${ok ? 'ok' : 'WRONG'}`);
+  }
+  console.log(`  ${pass ? 'helm agrees with the view, and the compass counts up to starboard'
+    : 'STEERING IS INVERTED'}`);
 }
 
 /* ===================================================================== */
@@ -219,6 +264,137 @@ function instrument() {
 }
 
 /* ===================================================================== */
+function scrubber() {
+  hr('LIFE SUPPORT  —  how long is an excursion, and what ends it');
+  console.log(`  canister capacity ${LIFE.CAPACITY.toFixed(1)} l CO2 usable`
+    + `  (0.25 kg sorbent x 120 l/kg, halved for 4 C water)`);
+  console.log('\n  duration by how hard you swim:');
+  for (const [label, speed] of [['floating still', 0], ['gentle 1.5 m/s', 1.5],
+    ['cruise 4.4 m/s', 4.4], ['boosted 11.4 m/s', 11.4]]) {
+    const l = new LIFE.Life();
+    let t = 0;
+    while (l.phase !== 'blackout' && t < 60 * 200) { l.update(DT, { aboard: false, speed }); t += DT; }
+    console.log(`    ${label.padEnd(17)} ${(t / 60).toFixed(1)} min`
+      + `   ${l.rate.toFixed(2)} l/min CO2`);
+  }
+
+  console.log('\n  the last quarter of a canister, at a cruise:');
+  const l = new LIFE.Life();
+  let t = 0, seen = {};
+  while (l.phase !== 'waking' && t < 60 * 200) {
+    l.update(DT, { aboard: false, speed: 4.4 });
+    for (const e of l.events) if (e.kind === 'phase' || e.kind === 'blackout' || e.kind === 'wake') {
+      const key = e.phase || e.kind;
+      if (!seen[key]) {
+        seen[key] = t;
+        console.log(`    ${String(key).padEnd(10)} at ${(t / 60).toFixed(2)} min`
+          + `   left ${(l.remaining * 100).toFixed(0)}%  breath ${l.breath.toFixed(0)} bpm`
+          + `  veil ${l.veil.toFixed(2)}  alarm ${l.alarm.toFixed(2)}`);
+      }
+    }
+    t += DT;
+  }
+
+  let wake = 0;
+  while (l.fade > 0 && wake < 60 * 20) { l.update(DT, { aboard: true, speed: 0 }); wake += DT; }
+  console.log(`    came round after ${wake.toFixed(1)} s of fade, phase ${l.phase}, canister fresh`);
+
+  /* The case that actually matters, which the blackout path hides: coming back
+   * aboard *voluntarily* with a nearly spent canister. A readout that snaps to
+   * full on crossing the hatch tells the player the resource was never real. */
+  const v = new LIFE.Life();
+  let out = 0;
+  while (v.remaining > 0.12 && out < 60 * 100) { v.update(DT, { aboard: false, speed: 4.4 }); out += DT; }
+  const before = v.remaining;
+  let swap = 0;
+  while (v.remaining < 0.999 && swap < 60 * 60) { v.update(DT, { aboard: true, speed: 0 }); swap += DT; }
+  console.log(`\n  came back at ${(before * 100).toFixed(0)}% after ${(out / 60).toFixed(1)} min out;`
+    + ` full again ${swap.toFixed(1)} s later, phase ${v.phase}`);
+  console.log(`  ${v.remaining > 0.999 && v.phase === 'ok' && swap > 5
+    ? 'the loop closes both ways: blackout, and a swap you have to wait for'
+    : 'THE LOOP DOES NOT CLOSE'}`);
+}
+
+/* ===================================================================== */
+function score() {
+  hr('THE SCORE  —  is it there, and does it stay under the instruments?');
+  /* Asked for as "tense music, tastefully". The whole risk is that it damages the
+   * silence the rest of the sound layer was built around, so the useful question
+   * is not "can you hear it" but "can you still hear a creak over it". */
+  console.log(`  floor ${A.SCORE.floor}  ceiling ${A.SCORE.ceiling}`
+    + `  root ${A.SCORE.root.toFixed(1)} Hz  ring ${A.SCORE.ring.toFixed(1)} Hz`
+    + `  ratio ${(A.SCORE.ring / A.SCORE.root).toFixed(2)}`);
+
+  /* A real descent from the shelf, then sitting on the bottom for a while.
+   *
+   * `background` deliberately excludes the ballast hiss and the bottom scrape.
+   * The first version of this check summed every continuous voice and reported a
+   * catastrophic -13.7 dB, all of which came from frame zero: the test commands a
+   * full flood instantly, so the blow was at maximum. But a blow is an
+   * *instrument*, not a background — asking a creak to stand clear of it is like
+   * asking it to stand clear of a grounding. What a creak has to beat is the
+   * stuff that is always there. */
+  const background = (v) => v.bedLow + v.bedHiss + v.machGain + v.scoreGain;
+  const r = rig(60);
+  r.v.ballastCmd = 1.0;
+  let mark = 0, loudestScore = 0;
+  let bgDeep = 0, bgShelf = 0, creakDeep = 1e9, creakShelf = 1e9;
+  console.log('\n      t    depth   dP/dt   tension  score   crowd*duck   continuous');
+  for (let i = 0; i < 60 * 420; i++) {
+    if (r.t > 300) r.v.ballastCmd = 0.5;      // settle on the floor
+    const depth = step(r, DT, { scrubber: 1, boatRange: 0 });
+    const cont = bedSum(r.a.v);
+    loudestScore = Math.max(loudestScore, r.a.v.scoreGain);
+    const deep = depth > 380;
+    if (deep) bgDeep = Math.max(bgDeep, background(r.a.v));
+    else if (depth < 120) bgShelf = Math.max(bgShelf, background(r.a.v));
+    for (const e of r.a.events) {
+      if (e.kind !== 'creak') continue;
+      if (deep) creakDeep = Math.min(creakDeep, e.level);
+      else if (depth < 120) creakShelf = Math.min(creakShelf, e.level);
+    }
+    if (r.t >= mark) {
+      const eff = r.a.v.scoreGain / Math.max(1e-9,
+        A.SCORE.floor + (A.SCORE.ceiling - A.SCORE.floor) * r.a.tension);
+      console.log(`  ${f(r.t, 0)}  ${f(SEA_LEVEL - r.v.pos.y, 1)}  ${f(r.a.dPdt, 4)}`
+        + `   ${f(r.a.tension, 3)}  ${f(r.a.v.scoreGain, 4)}    ${f(eff, 3)}      ${f(cont, 4)}`);
+      mark += 60;
+    }
+  }
+
+  /* The gate, and it applies at depth rather than everywhere.
+   *
+   * On the shelf the margin is genuinely poor, and that is physics rather than a
+   * defect: surface agitation noise is loudest in the shallows while hull stress
+   * is lowest there, so a shelf creak is quiet against a bright bed. It is also
+   * not where the game lives. The canyon floor is where a creak has to land, and
+   * there the bed has faded to almost nothing — so that is the number the score's
+   * ceiling is allowed to spend. Both are printed, so nobody has to rediscover
+   * why the shallow one looks bad. */
+  const mDeep = 20 * Math.log10(creakDeep / bgDeep);
+  const mShelf = 20 * Math.log10(creakShelf / bgShelf);
+  console.log(`\n  loudest score            ${loudestScore.toFixed(4)}  (ceiling ${A.SCORE.ceiling})`);
+  console.log(`  on the floor, below 380 m:  background ${bgDeep.toFixed(4)}`
+    + `  quietest creak ${creakDeep.toFixed(4)}   margin ${mDeep.toFixed(1)} dB`
+    + `   ${mDeep >= 6 ? 'ok, a creak still lands' : 'TOO LOUD — lower SCORE.ceiling'}`);
+  console.log(`  on the shelf, above 120 m:  background ${bgShelf.toFixed(4)}`
+    + `  quietest creak ${creakShelf.toFixed(4)}   margin ${mShelf.toFixed(1)} dB`);
+  console.log('                              expected to be poor: loud surface noise, low hull stress');
+
+  // And the score has to actually respond to jeopardy, or it is wallpaper.
+  console.log('\n  tension by cause, held for 90 s each:');
+  for (const [label, extra] of [
+    ['still, mid-water', { scrubber: 1, boatRange: 0 }],
+    ['low on sorbent', { scrubber: 0.05, boatRange: 0 }],
+    ['far from the trunk', { scrubber: 1, boatRange: 110, aboard: false }],
+  ]) {
+    const q = rig(300);
+    for (let i = 0; i < 60 * 90; i++) step(q, DT, extra);
+    console.log(`    ${label.padEnd(20)} tension ${q.a.tension.toFixed(2)}  score ${q.a.v.scoreGain.toFixed(4)}`);
+  }
+}
+
+/* ===================================================================== */
 function stuck() {
   hr('NO STUCK VOICES  —  everything back to its floor after the excitement');
   const r = rig(120);
@@ -244,7 +420,7 @@ function stuck() {
 }
 
 /* ===================================================================== */
-const SUITE = { constants, tank, descent, telegraph, ballast, silence, instrument, stuck };
+const SUITE = { constants, helm, scrubber, score, tank, descent, telegraph, ballast, silence, instrument, stuck };
 for (const [name, fn] of Object.entries(SUITE)) {
   if (only && only !== name) continue;
   fn();
