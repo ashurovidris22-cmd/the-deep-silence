@@ -72,6 +72,13 @@ const SHOTS = [
   ['B-chart',   `g.inside('chart');`],
   ['C-fwd',     `g.inside('fwd');`],
   ['D-aft',     `g.inside('aft');`],
+
+  /* Her outside, which did not exist before she could be driven away from.
+   * Three bearings, because a hull is judged on its silhouette and one view of a
+   * body of revolution tells you almost nothing. */
+  ['E-hullq',   `g.outside(52, 16, 2.0);`],
+  ['F-hullb',   `g.outside(150, 15, 1.2);`],
+  ['G-hulls',   `g.outside(-8, 13, 0.5);`],
 ];
 
 const browser = await launch();

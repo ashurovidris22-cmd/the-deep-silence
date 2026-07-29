@@ -135,11 +135,22 @@ export class Welder {
        * reads as a smooth plastic rod no matter what the fragment shader does.
        * Arc length rather than angle, so the texel size is the same on a 4 cm
        * rung and a 30 cm main. */
+      /* Half-extent -1 on the u axis means "this direction wraps".
+       *
+       * A cylinder has no rim going round it, and saying so matters: the painted
+       * case material derives its chipping, its bolt band and its chamfer from
+       * the distance to the nearest edge, and for a tube the u coordinate runs
+       * 0..2*pi*r while the half-extent was a single facet's width. So
+       * `ext.x - abs(u)` came out negative at nearly every fragment and the
+       * shader treated the entire surface of an air bottle as a knocked corner —
+       * which is exactly why the two HP bottles were the flattest, most
+       * featureless objects in the machinery space. The axial extent is real and
+       * stays; the circumferential one is now flagged as absent. */
       const uA = a0 * r, uB = a1 * r, hl = len / 2;
-      this._push(x0 + n0[0] * r, y0 + n0[1] * r, z0 + n0[2] * r, n0[0], n0[1], n0[2], m, wear, uA, -hl, r * Math.PI / sides, hl);
-      this._push(x0 + n1[0] * r, y0 + n1[1] * r, z0 + n1[2] * r, n1[0], n1[1], n1[2], m, wear, uB, -hl, r * Math.PI / sides, hl);
-      this._push(x1 + n1[0] * r, y1 + n1[1] * r, z1 + n1[2] * r, n1[0], n1[1], n1[2], m, wear, uB, hl, r * Math.PI / sides, hl);
-      this._push(x1 + n0[0] * r, y1 + n0[1] * r, z1 + n0[2] * r, n0[0], n0[1], n0[2], m, wear, uA, hl, r * Math.PI / sides, hl);
+      this._push(x0 + n0[0] * r, y0 + n0[1] * r, z0 + n0[2] * r, n0[0], n0[1], n0[2], m, wear, uA, -hl, -1, hl);
+      this._push(x0 + n1[0] * r, y0 + n1[1] * r, z0 + n1[2] * r, n1[0], n1[1], n1[2], m, wear, uB, -hl, -1, hl);
+      this._push(x1 + n1[0] * r, y1 + n1[1] * r, z1 + n1[2] * r, n1[0], n1[1], n1[2], m, wear, uB, hl, -1, hl);
+      this._push(x1 + n0[0] * r, y1 + n0[1] * r, z1 + n0[2] * r, n0[0], n0[1], n0[2], m, wear, uA, hl, -1, hl);
       this.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
     }
   }

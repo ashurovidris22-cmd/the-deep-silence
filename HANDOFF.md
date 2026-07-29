@@ -218,6 +218,35 @@ messages, at more length.
   atan2(dy, L)` — the interior station table uses an `AIM()` helper for exactly
   this, after the hand-written version missed its subject at every close range.
 
+### OPEN DEFECT — one bright cyan quad inside the machinery space
+
+Introduced somewhere in the exterior-hull pass and **not yet identified**. What is
+established, so the next session does not start over:
+
+- It is a flat rectangle roughly 0.9 x 0.8 m on the **port** shell around
+  z = -2 to -3.6, visible from the `stern` station (looking aft, port appears on
+  the *right* of frame — worth remembering before hunting on the wrong side).
+- It carries a soft 6x5 checkerboard, which is the `I.PANEL` breaker lattice, so
+  the switchboard face at z = -3.55 and the scrubber face at z = -1.95 are the
+  only two candidates.
+- It is **absent** from the last pushed build's `u-stern` frame, so it is a
+  regression from this session, not something old.
+- Three of its four siblings were the exterior hull's fittings coming through
+  the pressure hull (fixed — see below); this one survived that fix, so it is
+  *not* an exterior penetration.
+- Arithmetic says it should not be bright: the panel's albedo tops out at 0.115,
+  the deckhead lamp two metres away contributes about 0.12, and the emissive term
+  is masked to the bottom eighth of the panel where the indicator lamps are.
+  Measured brightness is far above that, so something is adding light that the
+  branch does not account for.
+- The distance fade added for lattice aliasing does not apply at this range
+  (2.5 m), so aliasing is not the cause either.
+
+**Next step is one render, not more reasoning:** add `uDebug == 3` to the
+interior fragment shader outputting `vMat / 12.0` as greyscale and shoot the
+`stern` station. That names the material in a single frame. Three subsystems have
+already looked guilty in this project and been innocent; do not skip the probe.
+
 ### Added by the piloting pass
 
 - **Caustics were riding on the bio floor, so they never switched off.**

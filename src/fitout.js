@@ -138,10 +138,17 @@ export function buildDecalAtlas() {
     const lines = text.split('\n');
     const lh = size * 1.02;
     lines.forEach((ln, i) => g.fillText(ln, 0, (i - (lines.length - 1) / 2) * lh));
-    // Bridges: two horizontal cuts through the glyphs.
+    /* Bridges: two horizontal cuts through the glyphs — and they have to scale
+     * with the type.
+     *
+     * Fixed at four pixels they removed most of a 38 px two-line label, so the
+     * H.P. AIR plate on the air bottles rendered as a blank white square: the
+     * plate was legible, the word on it was not. Proportional cuts keep the
+     * stencil read at every size in the sheet. */
     g.globalCompositeOperation = 'destination-out';
     g.fillStyle = '#000';
-    for (const fy of [-0.20, 0.24]) g.fillRect(-CELL / 2, fy * size - 2.0, CELL, 4.0);
+    const cut = Math.max(1.6, size * 0.042);
+    for (const fy of [-0.20, 0.24]) g.fillRect(-CELL / 2, fy * size - cut / 2, CELL, cut);
     g.restore();
     g.globalCompositeOperation = 'source-over';
   };
@@ -347,7 +354,22 @@ export function ring(W, cx, cy, cz, R, tr, seg, axis = 'z', m = I.TRIM, wear = 0
  * that separate by hue rather than by value — and hue separation is what stops
  * a monochrome room from reading as one moulded surface.
  */
-export function handwheel(W, cx, cy, cz, R, axis = 'x') {
+export function handwheel(W, cx, cy, cz, R, axis = 'x', stem = 0) {
+  /* The spindle, and it was the most obvious fault in the whole fit-out.
+   *
+   * The hub was a disc four centimetres thick, so between the wheel and the
+   * valve bonnet below it there was nothing at all — three brass wheels hanging
+   * in mid-air over three separate lumps. A handwheel turns a stem; without the
+   * stem drawn it is not a control, it is an ornament that has come loose. */
+  if (stem > 0) {
+    const d = axis === 'x' ? [1, 0, 0] : axis === 'y' ? [0, 1, 0] : [0, 0, 1];
+    W.tube(cx - d[0] * stem, cy - d[1] * stem, cz - d[2] * stem, cx, cy, cz,
+      R * 0.14, 8, I.TRIM, 0.45);
+    // A gland nut where the stem enters the bonnet: the detail that says sealed.
+    W.tube(cx - d[0] * stem, cy - d[1] * stem, cz - d[2] * stem,
+      cx - d[0] * stem * 0.72, cy - d[1] * stem * 0.72, cz - d[2] * stem * 0.72,
+      R * 0.26, 8, I.BRASS, 0.4);
+  }
   ring(W, cx, cy, cz, R, R * 0.10, 14, axis, I.BRASS, 0.35);
   const at = (a, r) => (
     axis === 'x' ? [cx, cy + Math.cos(a) * r, cz + Math.sin(a) * r]
@@ -536,7 +558,7 @@ export function extinguisher(F, x, y, z, s) {
   for (const by of [y + 0.10, y + 0.32]) {                              // bracket bands
     W.box(x + s * 0.055, by, z, 0.055, 0.045, 0.17, 0, I.TRIM, 0.6);
   }
-  placard(W, x + IN(s) * 0.076, y + 0.20, z, 0.09, 0.11, 'x', IN(s), 'FIRE');
+  placard(W, x + IN(s) * 0.078, y + 0.20, z, 0.125, 0.15, 'x', IN(s), 'FIRE');
 }
 
 /** Stowed crate, strapped down. */
@@ -701,8 +723,8 @@ export function sternMachinery(F) {
       [bx - 0.10, DECK_Y + 0.42, z - 0.78],
       [bx - 0.10, DECK_Y - 0.05, z - 0.78],
     ], 0.070);
-    handwheel(W, bx - 0.10, DECK_Y + 1.05, z + 0.51, 0.135, 'z');
-    placard(W, bx + 0.32, DECK_Y + 0.62, z - 0.30, 0.10, 0.12, 'x', 1, 'PUMP');
+    handwheel(W, bx - 0.10, DECK_Y + 1.05, z + 0.51, 0.135, 'z', 0.19);
+    placard(W, bx + 0.32, DECK_Y + 0.62, z - 0.30, 0.15, 0.17, 'x', 1, 'PUMP');
   }
 
   /* High-pressure air: two bottles in a rack against a frame.
@@ -715,7 +737,7 @@ export function sternMachinery(F) {
     for (const dz of [-0.24, 0.24]) {
       W.tube(x, DECK_Y + 0.10, z + dz, x, DECK_Y + 1.18, z + dz, 0.135, 14, I.LOCK, 0.4);
       W.tube(x, DECK_Y + 1.18, z + dz, x, DECK_Y + 1.27, z + dz, 0.055, 10, I.BRASS, 0.35);
-      handwheel(W, x, DECK_Y + 1.33, z + dz, 0.075, 'y');
+      handwheel(W, x, DECK_Y + 1.33, z + dz, 0.075, 'y', 0.06);
     }
     F.solid(x, DECK_Y + 0.64, z, 0.30, 1.28, 0.72);
     for (const by of [DECK_Y + 0.30, DECK_Y + 1.00]) {                          // rack bands
@@ -725,7 +747,7 @@ export function sternMachinery(F) {
       [x, DECK_Y + 1.30, z - 0.24], [x, DECK_Y + 1.52, z - 0.24],
       [x, DECK_Y + 1.52, z + 0.24], [x, DECK_Y + 1.52, z + 1.90],
     ], 0.028, I.BRASS, 0.4);
-    placard(W, x + IN(S) * 0.140, DECK_Y + 0.86, z, 0.11, 0.13, 'x', IN(S), 'HPAIR');
+    placard(W, x + IN(S) * 0.140, DECK_Y + 0.86, z, 0.17, 0.19, 'x', IN(S), 'HPAIR');
   }
 
   /* Main switchboard, by the door because that is where a hand reaches for it.
@@ -746,7 +768,7 @@ export function sternMachinery(F) {
     for (const cy of [DECK_Y + 0.66, DECK_Y + 1.38]) {
       W.tube(bf, cy, z - 0.47, bf, cy, z + 0.47, 0.016, 6, I.TRIM, 0.5);        // face rails
     }
-    placard(W, bf - P * 0.010, DECK_Y + 1.52, z, 0.12, 0.14, 'x', -P, 'MAIN');
+    placard(W, bf - P * 0.010, DECK_Y + 1.52, z, 0.18, 0.20, 'x', -P, 'MAIN');
     // The loom that leaves it, dropping to the cable tray.
     loom(W, x - P * 0.24, DECK_Y + 1.56, z + 0.5, z + 2.4, 4, 0.018, 0.9);
   }
@@ -765,8 +787,8 @@ export function sternMachinery(F) {
       const vz = z - 0.42 + i * 0.42;
       W.tube(x, DECK_Y + 0.30, vz, x, DECK_Y + 0.56, vz, 0.052, 8, I.TRIM, 0.55);
       W.box(x, DECK_Y + 0.60, vz, 0.13, 0.11, 0.13, 0, I.BRASS, 0.4);          // bonnet
-      handwheel(W, x, DECK_Y + 0.76, vz, 0.105, 'y');
-      placard(W, x - S * 0.075, DECK_Y + 0.60, vz, 0.085, 0.10, 'x', -S, t);
+      handwheel(W, x, DECK_Y + 0.76, vz, 0.105, 'y', 0.16);
+      placard(W, x - S * 0.075, DECK_Y + 0.58, vz, 0.125, 0.145, 'x', -S, t);
     });
     F.solid(x, DECK_Y + 0.45, z, 0.24, 0.90, 1.30);
     pipeline(W, [
@@ -840,7 +862,7 @@ export function sternMachinery(F) {
   }
 
   // Compartment number, beside the door on the way forward.
-  placard(W, standX(-2.95, P) - P * 0.01, DECK_Y + 1.55, -2.95, 0.16, 0.20, 'x', -P, 'ONE');
+  placard(W, standX(-2.95, P) - P * 0.01, DECK_Y + 1.55, -2.95, 0.19, 0.23, 'x', -P, 'ONE');
   extinguisher(F, standX(-3.15, S) - S * 0.10, DECK_Y + 0.55, -3.15, S);
 }
 
@@ -934,7 +956,7 @@ export function midAccommodation(F) {
       [sf, DECK_Y + 1.46, z - 0.24], [sf, DECK_Y + 1.46, z + 0.24],
       [sf, DECK_Y + 1.70, z + 0.24], [sf, DECK_Y + 1.70, z - 0.24],
       I.PANEL, 0.25, [[0, 0.62], [1, 0.62], [1, 1], [0, 1]]);
-    placard(W, sf - P * 0.006, DECK_Y + 1.34, z, 0.13, 0.11, 'x', -P, 'SCRUB');
+    placard(W, sf - P * 0.006, DECK_Y + 1.34, z, 0.19, 0.16, 'x', -P, 'SCRUB');
     // Breathing air return, up into the deckhead trunk.
     pipeline(W, [
       [x, DECK_Y + 1.74, z], [x, 1.86, z], [0.42, 1.86, z],
@@ -984,7 +1006,7 @@ export function midAccommodation(F) {
       [x + S * 0.22, DECK_Y + 0.87, z - 0.24], [x + S * 0.22, DECK_Y + 1.06, z - 0.24],
       [x + S * 0.04, DECK_Y + 1.10, z - 0.24], [x + S * 0.02, DECK_Y + 1.00, z - 0.24],
     ], 0.016, I.BRASS, 0.35);
-    handwheel(W, x + S * 0.22, DECK_Y + 1.09, z - 0.24, 0.048, 'y');
+    handwheel(W, x + S * 0.22, DECK_Y + 1.09, z - 0.24, 0.048, 'y', 0.05);
     // Kettle.
     W.tube(x - S * 0.06, DECK_Y + 0.87, z + 0.30, x - S * 0.06, DECK_Y + 1.03, z + 0.30,
       0.082, 12, I.TRIM, 0.45);
@@ -1032,7 +1054,7 @@ export function midAccommodation(F) {
   }
 
   extinguisher(F, standX(3.85, P) - P * 0.09, DECK_Y + 0.60, 3.85, P);
-  placard(W, standX(3.95, S) - S * 0.01, DECK_Y + 1.55, 3.95, 0.16, 0.20, 'x', -S, 'TWO');
+  placard(W, standX(3.95, S) - S * 0.01, DECK_Y + 1.55, 3.95, 0.19, 0.23, 'x', -S, 'TWO');
   placard(W, standX(-2.15, S) - S * 0.01, DECK_Y + 1.30, -2.15, 0.20, 0.13, 'x', -S, 'HAZARD');
 }
 
@@ -1185,6 +1207,6 @@ export function bowHelm(F) {
   ring(W, 0, DECK_Y + 0.03, 6.55, 0.26, 0.020, 14, 'y', I.TRIM, 0.6);
   ring(W, 0, DECK_Y + 0.20, 6.85, 0.17, 0.016, 12, 'y', I.TRIM, 0.5);
 
-  placard(W, standX(4.95, P) - P * 0.01, DECK_Y + 1.55, 4.95, 0.16, 0.20, 'x', -P, 'THREE');
+  placard(W, standX(4.95, P) - P * 0.01, DECK_Y + 1.55, 4.95, 0.19, 0.23, 'x', -P, 'THREE');
   extinguisher(F, standX(4.85, S) - S * 0.09, DECK_Y + 0.58, 4.85, S);
 }

@@ -10,6 +10,7 @@ import { buildInterior, interiorSolids, hullHalfWidth, DECK_Y, EYE, HULL_LEN, HE
 import { Post } from './post.js';
 import { Pilot } from './controls.js';
 import { Vessel } from './vessel.js';
+import { buildExterior } from './exterior.js';
 import { FS_VERT, WATER } from './glsl.js';
 
 const qs = new URLSearchParams(location.search);
@@ -472,6 +473,15 @@ scene.add(boat.mesh);
  * she *is* asks the vessel, because the answer changes. */
 const vessel = new Vessel(boat.origin.clone(), 0);
 
+/* And her outside, which did not exist until she could be driven away from.
+ *
+ * A second skin at the same stations plus plating. Front-faced only, so from the
+ * cabin every polygon of it is back-facing and culled — it costs one draw call
+ * indoors and needs no switching off by hand. */
+const ext = buildExterior();
+scene.add(ext.mesh);
+let propAngle = 0;
+
 const beaconSpecs = [
   { pos: [ 34, -390, -12], col: [220, 300, 330], size: 0.55 },
   { pos: [ 38, -392, -15], col: [150, 200, 225], size: 0.34 },
@@ -489,7 +499,7 @@ env.points = [
 ];
 
 for (const o of [terrain, kelp, rocks, snow, turf, pens, sponges, whips,
-  backdrop, station.mesh, sub.mesh]) env.register(o.material);
+  backdrop, station.mesh, sub.mesh, ext.mesh, ext.prop]) env.register(o.material);
 env.register(beacons.userData.mat);
 
 /* -------------------------------------------------------------------- poses
@@ -829,6 +839,23 @@ const game = {
     adaptExposure(0, true);
   },
   insides: () => Object.keys(INSIDE),
+  /* A free camera outside the boat, aimed at her.
+   *
+   * Not a pose, because a pose is a fixed world coordinate and the vessel moves.
+   * The bearing is solved from the two positions rather than chosen, for the
+   * same reason every other camera in this file is. */
+  outside: (deg = 40, dist = 17, h = 2.5) => {
+    pilot.frame = null; pilot.walk = false; pilot.enabled = false;
+    const a = deg * Math.PI / 180;
+    const px = vessel.pos.x + Math.sin(a) * dist;
+    const pz = vessel.pos.z + Math.cos(a) * dist;
+    const dx = vessel.pos.x - px, dz = vessel.pos.z - pz;
+    pilot.setFrom(new THREE.Vector3(px, vessel.pos.y + h, pz),
+      Math.atan2(dx, -dz) * 180 / Math.PI, -6);
+    game.lampOn = 1;
+    syncWater();
+    adaptExposure(0, true);
+  },
   // 0 off, 1 height field, 2 perturbed normal. See the interior fragment shader.
   dbg: (v) => { boat.mat.uniforms.uDebug.value = v; },
   /* setDepthBand already solved for the offset that yields this depth at the
@@ -841,7 +868,7 @@ const game = {
   visibility: () => env.visibility,
   setLayer: (name, on) => {
     const o = { kelp, rocks, snow, terrain, beacons, turf, pens, sponges, whips,
-      station: station.mesh, sub: sub.mesh, boat: boat.mesh }[name];
+      station: station.mesh, sub: sub.mesh, boat: boat.mesh, hull: ext.mesh }[name];
     if (o) o.visible = on;
     /* "hud" means every scrap of interface, not just the readout.
      *
@@ -945,6 +972,13 @@ function frame() {
   }
   vessel.update(dt, env.surfaceY - MIN_DEPTH);
   vessel.applyTo(boat.mesh);
+  /* Rotor speed follows the telegraph, not the speed through the water, because
+   * that is the honest relationship: order full ahead against a rock and the
+   * screw still turns. It is also the only way the player can tell from outside
+   * that the boat is under power while going nowhere. */
+  propAngle += (vessel.throttle * 9.0 + Math.sign(vessel.throttle) * 1.2) * dt;
+  ext.prop.rotation.z = propAngle;
+  vessel.applyTo(ext.mesh);
 
   pilot.update(dt);
   // Absolute surface plus an optional offset. Depth is then purely a function

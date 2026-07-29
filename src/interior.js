@@ -200,8 +200,14 @@ function interiorMaterial(atlas) {
           /* Painted cases. Everything keys off distance to the rim, which is the
            * whole reason the Welder now carries the face's half-extents: damage
            * is positional, and its position is the edge. Chips written with noise
-           * alone appear in the middle of panels, where nothing has ever hit. */
-          float edge = min(vExt.x - abs(p.x), vExt.y - abs(p.y));
+           * alone appear in the middle of panels, where nothing has ever hit.
+           *
+           * A negative half-extent means that axis wraps — a cylinder has no rim
+           * going round it — so that direction is reported as infinitely far
+           * from an edge instead of always at one. */
+          float ex = vExt.x < 0.0 ? 1e3 : vExt.x - abs(p.x);
+          float ey = vExt.y < 0.0 ? 1e3 : vExt.y - abs(p.y);
+          float edge = min(ex, ey);
           float h = 0.0;
           h -= 0.0038 * (1.0 - smoothstep(0.0, 0.007, edge));           // chamfer
           h += 0.0020 * (1.0 - smoothstep(0.026, 0.040, edge));         // rim bead
@@ -379,8 +385,18 @@ function interiorMaterial(atlas) {
            * Directional, and running fore-and-aft the way a real deck is laid, so
            * walking along the boat reads as travelling over a surface rather than
            * sliding across a texture. */
-          float slot = abs(fract(vUV.x * 22.0) - 0.5) * 2.0;
-          float rod  = abs(fract(vUV.y * 4.0) - 0.5) * 2.0;
+          /* Parallax, and it is what turns painted stripes into holes.
+           *
+           * The slots were 9 mm deep in the height field and completely flat in
+           * the albedo, so from a standing eye the deck read as a striped
+           * surface rather than as something you could drop a spanner through.
+           * Offsetting the lookup along the view direction by the slot depth is
+           * the cheapest possible parallax — one madd — and because the eye
+           * position is already in hull space here it costs nothing to set up. */
+          vec3 vd = normalize(vP - uEye);
+          vec2 par = vd.xz / max(-vd.y, 0.25) * 0.010;
+          float slot = abs(fract((vUV.x + par.x) * 22.0) - 0.5) * 2.0;
+          float rod  = abs(fract((vUV.y + par.y) * 4.0) - 0.5) * 2.0;
           float solid = max(smoothstep(0.30,0.60,slot), smoothstep(0.82,0.95,rod));
           /* Fade the slots toward the mean with distance.
            *
@@ -463,7 +479,8 @@ function interiorMaterial(atlas) {
           /* Equipment cases: painted, chipped along every edge people knock —
            * and now actually along the edges, because the rim distance is known
            * rather than approximated with a noise field. */
-          float edge = min(vExt.x - abs(vUV.x), vExt.y - abs(vUV.y));
+          float edge = min(vExt.x < 0.0 ? 1e3 : vExt.x - abs(vUV.x),
+                           vExt.y < 0.0 ? 1e3 : vExt.y - abs(vUV.y));
           float chip = fbm(vUV * 7.0, 3);
           col = mix(vec3(0.088, 0.096, 0.092), vec3(0.130, 0.126, 0.112), smoothstep(0.55,0.85,chip));
           float worn = (1.0 - smoothstep(0.0, 0.020, edge)) * smoothstep(0.35, 0.75, fbm(vUV * 16.0 + 2.3, 3));
@@ -555,18 +572,31 @@ function interiorMaterial(atlas) {
            * state — in a room with nobody in it to have caused it. */
           vec2 g = vUV;
           col = vec3(0.070, 0.074, 0.076);
-          // Breaker toggles on a lattice.
+          /* Breaker toggles on a lattice, faded with distance.
+           *
+           * Thirty toggles across a 0.9 m panel is a 3 cm period; seen down the
+           * length of the compartment at a grazing angle that is well under a
+           * pixel, and an unfiltered periodic pattern under a pixel does not
+           * average — it beats against the sample grid. The switchboard read as
+           * a flat bright dotted rectangle from six metres away while being
+           * perfectly correct from one. Exactly the artefact the deck grating
+           * had, in exactly the same shape, and the same one-line answer. */
+          float pFade = clamp(3.2 * exp(-length(uEye - vP) * 0.28), 0.0, 1.0);
           vec2 bc = fract(g * vec2(6.0, 5.0)) - 0.5;
           float body = (1.0 - smoothstep(0.24, 0.30, abs(bc.x))) * (1.0 - smoothstep(0.16, 0.22, abs(bc.y)));
+          body = mix(0.42, body, pFade);
           col = mix(col, vec3(0.115, 0.118, 0.112), body);
           float lever = (1.0 - smoothstep(0.05, 0.08, abs(bc.x))) * (1.0 - smoothstep(0.07, 0.11, abs(bc.y - 0.03)));
-          col = mix(col, vec3(0.030, 0.032, 0.030), lever * body);
+          col = mix(col, vec3(0.030, 0.032, 0.030), lever * body * pFade);
           gloss = 26.0;
           // Indicator row along the bottom eighth of the panel.
           float lampRow = 1.0 - smoothstep(0.06, 0.10, abs(g.y - 0.075));
           float idx = floor(g.x * 8.0);
           vec2 lc = vec2(fract(g.x * 8.0) - 0.5, (g.y - 0.075) * 8.0);
-          float bulb = 1.0 - smoothstep(0.22, 0.30, length(lc));
+          // The indicator row keeps its own, gentler fade: a lamp that vanishes
+          // with distance is wrong, but a lamp that aliases is worse.
+          float bulb = (1.0 - smoothstep(0.22, 0.30, length(lc)))
+                     * clamp(1.6 * exp(-length(uEye - vP) * 0.13), 0.0, 1.0);
           float pick = hash11(idx * 3.7 + floor(g.y * 3.0) * 11.3);
           vec3 lampCol = pick > 0.80 ? vec3(1.0, 0.62, 0.10)
                        : pick < 0.14 ? vec3(0.10, 0.10, 0.10)
@@ -601,12 +631,27 @@ function interiorMaterial(atlas) {
            * things in the boat that differ from their surroundings in colour
            * rather than in brightness — which is what stops a monochrome room
            * reading as a single moulded surface. */
-          float tarnish = smoothstep(0.40, 0.86, fbm(vUV * 9.0, 3));
+          /* Scaled hard on u, because on a pipe u is arc length.
+           *
+           * A 28 mm brass line has a circumference of 88 mm, so fbm at nine times
+           * u moved by 0.8 of a noise period all the way round it — effectively
+           * constant across the tube and varying only along its length. The HP
+           * air run therefore came out as flat yellow plastic with a few
+           * lengthwise bands. Forty times on u gives the patina real variation
+           * around the pipe, which is where a highlight needs something to
+           * break against. */
+          float tarnish = smoothstep(0.40, 0.86, fbm(vec2(vUV.x * 34.0, vUV.y * 7.0), 3));
           vec3 bright = vec3(0.42, 0.31, 0.13);
           vec3 dull   = vec3(0.140, 0.116, 0.070);
           col = mix(bright, dull, tarnish * (0.35 + 0.65 * vWear));
           // Polished where a hand grips: the high points keep their shine.
           col += vec3(0.10, 0.075, 0.030) * smoothstep(0.0002, 0.0008, h0) * gFine;
+          /* Grazing-angle brightening. Polished metal at a glancing incidence
+           * returns nearly everything, which is what puts the bright rim down
+           * the side of a pipe and is most of what separates brass from paint
+           * in a still frame. Two lines, no environment map. */
+          float fres = pow(1.0 - clamp(abs(dot(normalize(vN), V)), 0.0, 1.0), 3.0);
+          col += vec3(0.30, 0.23, 0.10) * fres * (1.0 - tarnish * 0.6);
           gloss = mix(180.0, 40.0, tarnish);
         }
 
