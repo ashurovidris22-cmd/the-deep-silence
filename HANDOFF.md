@@ -418,11 +418,74 @@ furniture, on-screen controls and contextual prompts.
   depth, and the canyon floor gets sea pens, glass sponges and whip corals.
   See `src/flora.js` for why the floor gets animals rather than plants.
 
-**Numbers as they stand:** 28 draw calls, ~1.4 M triangles with the flora in
-frame. **The sandbox cannot measure frame rate and the cloud browser is capped —
-this needs checking on the user's machine, where the last honest reading was
-200 fps at a much lower triangle count.** If it is short, the flora radii in
-`main.js` are the dial: they are set to 88 m against a lamp that reaches twelve.
+**Performance, finally measured on real hardware at 2560x1347:**
+
+| where | fps | draws | triangles |
+|---|---|---|---|
+| standing in the machinery space | 183 | 30 | 1743k |
+| swimming outside | 240 | 29 | 1714k |
+| walking while making 2.35 m/s | 196 | 30 | 1743k |
+
+Three times the 60 fps budget with a million triangles of flora and a second
+hull in. **The flora radii do not need trimming** — that dial can stay where it
+is, and there is room for creatures.
+
+### SOLVED — the bright teal canyon floor, after three sessions
+
+The diagnostic panel answered it in one screenshot, and the answer was not in any
+shader:
+
+```
+depth 14.0 m   epipelagic   vis 21.4 m   2 atm
+mode walk   lamp 0.18   exposure 0.080   band -410 m
+sun at eye  2.0e-1  9.5e+0  1.1e+1
+eye  75 -384 13   surface -370
+```
+
+**`band -410`.** The depth band had put the sea surface at y = -370 — three
+hundred and seventy metres *below* mean sea level, and fourteen metres above a
+player standing on the canyon floor at y = -384. So the game was correctly
+rendering fourteen metres of water: full daylight, caustics on the seabed, bright
+teal, red mostly absorbed. Every measurement I took of that screenshot was right;
+the scene simply was not at the depth the geometry said.
+
+How it happened: `setDepthBand(m)` solves `band = m + cameraY - SEA_LEVEL` and was
+unclamped, so asking for 14 m while the camera sat at -384 gave -410. It was
+wired to a `?depth=` URL parameter, so a pasted link put a human's whole session
+at the wrong depth for as long as the tab stayed open — even though the
+function's own comment says "Normal play never calls this".
+
+Two fixes, and the second matters more than the first: the band is clamped at
+zero, because a surface below sea level has no meaning in a world where depth is
+derived from position; and the parameter is gated behind `auto=1` so a review
+tool cannot reach a player.
+
+**The lesson is about instruments, not about clamps.** Three review rounds chased
+this as a shader bug — caustics, exposure metering, adaptation dynamics — and two
+of those rounds produced real fixes for real bugs that were not this one. What
+found it was printing `depth` next to `eye y` and noticing they disagreed. The
+project's own notes had already written the warning: *"Setting depth as an
+independent number would have let the two disagree, so that swimming downward
+changed the view without changing the water."* The band **is** that independent
+number. When a value can be set instead of derived, print it beside the thing it
+should agree with.
+
+### The bow port was a 40 cm hole, not a window
+
+The interior loft ran past the port to z = 9.5 and closed to 0.4 m, and since the
+bow is left uncapped so the helm can see out, *that pinhole was the view*. The
+acrylic ring sat a metre behind it in the dark framing nothing. A player
+photographed it: a small blown-out disc glowing in the middle of a black wall,
+which is a porthole in a ship's side, not the forward window a bow compartment
+exists for.
+
+The loft now ends at the port with a 1.95 m section, so the opening **is** the
+window — at the seated eye 1.6 m back it fills the whole frame. The exterior
+carries its skin to the same station and glazes it with a disc facing outward:
+from the water you see glass in a steel surround, and from the helm the same
+polygon is back-facing and culled, so the view out is untouched. That also closes
+a hole the previous version left — with the cabin culled from outside, an open bow
+meant looking into an empty shell.
 
 **She is now a vessel.** `src/vessel.js` is the boat as a body: throttle, rudder,
 ballast, drag split into surge/sway/heave, bottom contact against the slope
@@ -449,16 +512,7 @@ faster telegraph, X all stop, E to stand up.
 
 **The user's standing complaints, in their order of importance:**
 
-1. **Unexplained: a player screenshot of the canyon floor came back as a bright
-   teal lagoon with sunlight caustics on the seabed — mean sRGB 24,159,176 where
-   the same place measures 19,28,35 here.** Red matched and green was forty times
-   brighter, which is the spectral signature of *daylight through tens of metres*,
-   not of an exposure that opened too far. Not reproducible from this build at
-   any depth, in any mode, at either quality setting; a depth sweep of the whole
-   water column never produces it with flora in frame. The caustics half is now
-   explained and fixed. The brightness half needs the Depth readout from that
-   session before anyone theorises further.
-2. Sound. Hull creak under pressure would do more for tension than ten more panel
+1. Sound. Hull creak under pressure would do more for tension than ten more panel
    details.
 3. Creatures. Deliberately deferred: procedural organics are the hardest part.
    Technique is known — sine along the spine in the vertex shader, Verlet chains

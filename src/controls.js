@@ -137,7 +137,7 @@ export class Pilot {
        * down it; this only offsets the surface so the optics beyond the world's
        * own range can still be reached and inspected. */
       if (e.code === 'BracketRight') this.bandTarget = Math.min(5600, this.bandTarget + 70);
-      if (e.code === 'BracketLeft') this.bandTarget = Math.max(-30, this.bandTarget - 70);
+      if (e.code === 'BracketLeft') this.bandTarget = Math.max(0, this.bandTarget - 70);
       if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'ShiftLeft'].includes(e.code)) e.preventDefault();
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));

@@ -873,8 +873,18 @@ export function buildInterior() {
     { z: -3.5, w: 4.66, h: 4.6, sq: 2.5 },
     { z: 2.0, w: 4.70, h: 4.66, sq: 2.4 },
     { z: 6.2, w: 4.10, h: 4.00, sq: 2.2 },
-    { z: HULL_LEN - 0.5, w: 2.30, h: 2.20, sq: 1.9 },
-    { z: HULL_LEN + 0.5, w: 0.4, h: 0.4, sq: 1.8 },
+    /* The nose stops at the port instead of pinching past it.
+     *
+     * It used to run on to z = 9.5 and close to 0.4 m, and since the bow is left
+     * uncapped so the helm can see out, *that* 40 cm pinhole was the view. The
+     * acrylic ring at 0.92 m sat a metre behind it in the dark, framing nothing.
+     * A player photographed the result: a small blown-out disc glowing in the
+     * middle of a black wall, which is a porthole on a ship's side, not the
+     * forward window a submersible's bow compartment exists for.
+     *
+     * Ending the loft at the port makes the opening the window: 1.95 m across,
+     * which at the seated eye 1.6 m back fills 62 degrees — the whole frame. */
+    { z: HULL_LEN - 0.55, w: 1.95, h: 1.90, sq: 1.9 },
   ];
   loftInto(W, fairStations(control, 46), {
     count: 54, mat: I.HULL, wear: 0.6, flip: true, capBow: false, capStern: false,
@@ -888,12 +898,15 @@ export function buildInterior() {
   /* The bow port, and it is the reason the boat is worth walking to the front of.
    * A ring of acrylic set into the tapering nose, so the helm looks straight out
    * into the water the rest of the game happens in. */
+  /* Sized to the opening it frames, not to a number chosen before the opening
+   * existed. The loft now ends at PZ with a 1.95 m section, so the acrylic bears
+   * on a ring just outside that and the retaining bolts sit outside again. */
   const PZ = HULL_LEN - 0.55;
-  W.tube(0, 0.10, PZ, 0, 0.10, PZ + 0.06, 0.92, 60, I.ACRYL, 0.3);
-  W.tube(0, 0.10, PZ - 0.05, 0, 0.10, PZ + 0.02, 0.98, 60, I.TRIM, 0.5);
-  for (let i = 0; i < 24; i++) {
-    const a = (i / 24) * Math.PI * 2;
-    W.box(Math.cos(a) * 1.02, 0.10 + Math.sin(a) * 1.02, PZ - 0.02, 0.05, 0.05, 0.05, a, I.TRIM, 0.6);
+  W.tube(0, 0.0, PZ - 0.10, 0, 0.0, PZ - 0.02, 1.00, 60, I.ACRYL, 0.3);
+  W.tube(0, 0.0, PZ - 0.16, 0, 0.0, PZ - 0.06, 1.07, 60, I.TRIM, 0.5);
+  for (let i = 0; i < 28; i++) {
+    const a = (i / 28) * Math.PI * 2;
+    W.box(Math.cos(a) * 1.12, Math.sin(a) * 1.12, PZ - 0.11, 0.055, 0.055, 0.06, a, I.TRIM, 0.6);
   }
 
   // Ladder to the top hatch, amidships.

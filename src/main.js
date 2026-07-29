@@ -690,7 +690,27 @@ function applyPose(name) {
  * you have swum to. It exists so the review set can still shoot a depth ladder
  * from one position instead of needing an eleven-kilometre mesh. */
 function setDepthBand(metres) {
-  pilot.band = pilot.bandTarget = metres + camera.position.y - SEA_LEVEL;
+  /* Clamped at zero, and this one cost three sessions.
+   *
+   * A negative band puts the sea surface *below* mean sea level, which has no
+   * meaning in this world: the surface is at SEA_LEVEL and depth is derived from
+   * where you are. Unclamped, `setDepthBand(14)` called while the camera sat on
+   * the canyon floor at y = -384 solved for a band of -410 — a surface 370 m
+   * below sea level, 14 m above the player's head, and therefore full daylight,
+   * caustics and bright teal water at four hundred metres down. Three review
+   * rounds chased that as a shader bug. It was one missing clamp, and the
+   * diagnostic panel found it in one screenshot: `depth 14.0 m` beside
+   * `eye y -384`.
+   *
+   * The project's own notes already warned about exactly this: "Setting depth as
+   * an independent number would have let the two disagree, so that swimming
+   * downward changed the view without changing the water." The band is that
+   * independent number, and it was reachable from a URL a human might paste.
+   *
+   * Zero is not a fudge. Band 0 means the surface is where the world says it is,
+   * which is the only state normal play should ever be in; the harness only ever
+   * asks for *more* water overhead, never less. */
+  pilot.band = pilot.bandTarget = Math.max(0, metres + camera.position.y - SEA_LEVEL);
   env.surfaceY = SEA_LEVEL + pilot.band;
 }
 
@@ -1198,7 +1218,14 @@ applyPose(qStr('pose', 'shelf'));
 /* Default to standing in the boat. The harness still drives poses explicitly, so
  * this only affects a human opening the page. */
 if (!qs.has('pose')) enterWalk();
-if (qs.has('depth')) game.setDepth(qNum('depth', 38));
+/* Review-only, and now gated as such.
+ *
+ * `setDepthBand`'s own comment says "Normal play never calls this" — but it was
+ * wired to a URL parameter, so a pasted link with ?depth= in it silently put a
+ * human player's whole session at the wrong depth for as long as the tab stayed
+ * open. A tool that can desynchronise the world from the player belongs behind
+ * the harness flag. */
+if (qs.has('depth') && qStr('auto', '0') === '1') game.setDepth(qNum('depth', 38));
 resize();
 
 // Warm the shaders before showing the button. A first frame that takes two

@@ -155,6 +155,18 @@ export class Welder {
     }
   }
 
+  /** Flat disc facing +Z or -Z. For capping an opening with glass. */
+  disc(cx, cy, cz, r, sides = 32, face = 1, m = M_GLASS, wear = 0.3) {
+    const c = this._push(cx, cy, cz, 0, 0, face, m, wear, 0, 0, r, r);
+    for (let i = 0; i < sides; i++) {
+      const a0 = (i / sides) * Math.PI * 2, a1 = ((i + 1) / sides) * Math.PI * 2;
+      const p = (a) => this._push(cx + Math.cos(a) * r, cy + Math.sin(a) * r, cz,
+        0, 0, face, m, wear, Math.cos(a) * r, Math.sin(a) * r, r, r);
+      const v0 = p(a0), v1 = p(a1);
+      if (face > 0) this.idx.push(c, v0, v1); else this.idx.push(c, v1, v0);
+    }
+  }
+
   geometry() {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));

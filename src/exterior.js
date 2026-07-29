@@ -94,7 +94,7 @@ export function buildExterior() {
     { z: -3.5, w: 4.66 + g, h: 4.60 + g, sq: 2.5 },
     { z: 2.0, w: W_MAX + g, h: 4.66 + g, sq: 2.4 },
     { z: 6.2, w: 4.10 + g, h: 4.00 + g, sq: 2.2 },
-    { z: 7.9, w: 2.70 + g, h: 2.60 + g, sq: 1.9 },
+    { z: HULL_LEN - 0.55, w: 1.95 + g, h: 1.90 + g, sq: 1.9 },
   ];
   /* Sixty-four around. Measured rather than chosen: twenty segments on a 4.9 m
    * beam is a 77 cm facet, which at ten metres is over a hundred pixels of flat
@@ -161,9 +161,20 @@ export function buildExterior() {
     W.tube(gx, crown - 0.22, HZ - 2.6, gx, crown - 0.22, HZ + 2.4, 0.030, 10, MAT.PIPE, 0.7);
   }
 
-  /* Bow port surround: a proud ring round the opening the loft leaves. */
-  W.tube(0, 0.10, 7.96, 0, 0.10, 8.12, 1.34, 48, MAT.STEEL, 0.5);
-  W.tube(0, 0.10, 8.10, 0, 0.10, 8.16, 1.22, 48, MAT.PIPE, 0.45);
+  /* The port, glazed.
+   *
+   * A disc rather than an open hole, and front-facing outward, which does both
+   * jobs at once: from the water you see glass in a steel surround, and from the
+   * helm the same polygon is back-facing and culled, so the view straight out is
+   * untouched. That is the whole reason the cabin can look through a window that
+   * the outside world can also see.
+   *
+   * It also closes a hole the previous version left: with the cabin culled when
+   * the eye is outside, an open bow meant looking into an empty shell. */
+  const PZ = HULL_LEN - 0.55;
+  W.disc(0, 0, PZ + 0.10, 1.00, 44, 1, MAT.GLASS, 0.2);
+  W.tube(0, 0, PZ + 0.02, 0, 0, PZ + 0.16, 1.14, 48, MAT.STEEL, 0.5);
+  W.tube(0, 0, PZ + 0.13, 0, 0, PZ + 0.19, 1.02, 48, MAT.PIPE, 0.45);
 
   /* Floodlights on the bow shoulders, off-axis exactly as the lighting code
    * mounts them — a lamp beside the lens fires its beam back into it, which is
