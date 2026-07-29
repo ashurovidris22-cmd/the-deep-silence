@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { HULL_LEN, HULL_R, DECK_Y, DECK_HALF, EYE, HELM } from './hull.js';
 
 /* Fit-out: everything inside the pressure hull that is not the hull.
  *
@@ -59,13 +60,12 @@ export const I = {
   BRASS: 11,  // valve wheels and copper lines — the only warm metal aboard
 };
 
-// Hull geometry. Everything else is derived from these five numbers.
-export const HULL_LEN = 9.0;      // half-length: z from -9 to +9
-export const HULL_R = 2.35;      // interior radius at the widest
-export const DECK_Y = -1.05;     // deck plane, below the hull axis
-export const DECK_HALF = 1.95;   // deck half-width
-export const EYE = 1.62;         // standing eye height above the deck
-export const HELM = { z: 6.9, y: DECK_Y + 1.18 };   // seated eye at the helm
+/* Hull geometry. Everything else is derived from these five numbers, and they
+ * now live in `hull.js` — a file with no imports at all, so that a module
+ * without a renderer can ask how big the boat is without inheriting `three`.
+ * Re-exported here because half the project already imports them from this
+ * file and there is no reason to make it stop. */
+export { HULL_LEN, HULL_R, DECK_Y, DECK_HALF, EYE, HELM };
 
 /**
  * Unclamped interior half-width of the shell at (z, y), in metres.

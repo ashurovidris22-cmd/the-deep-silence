@@ -41,4 +41,11 @@ export const SEEDS = {
   pens: 0x5eed0006,
   sponge: 0x5eed0007,
   whip: 0x5eed0008,
+  /* Sound draws from here for the same reason the boulders do. The creak is a
+   * Poisson process, so without a seed two runs of `tools/dyn.mjs` disagree
+   * about how many times the hull spoke and no measurement can be compared
+   * against yesterday's. The noise buffers are seeded so that a rendered
+   * spectrum is reproducible, which is what makes an offline render a test. */
+  creak: 0x5eed0009,
+  noise: 0x5eed000a,
 };

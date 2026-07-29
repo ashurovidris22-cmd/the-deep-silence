@@ -11,6 +11,7 @@ import { Post } from './post.js';
 import { Pilot } from './controls.js';
 import { Vessel } from './vessel.js';
 import { buildExterior } from './exterior.js';
+import { Audio } from './audio.js';
 import { FS_VERT, WATER } from './glsl.js';
 
 const qs = new URLSearchParams(location.search);
@@ -233,6 +234,17 @@ const camera = new THREE.PerspectiveCamera(62, 1, 0.05, 900);
 
 const env = new Env();
 const post = new Post(renderer);
+
+/* Sound. Built here, started from the Begin descent button, because a context
+ * created outside a user gesture starts suspended and stays that way.
+ *
+ * Off by default under `auto=1`. The review harness takes thirty frames per run
+ * and has no ears; a synthesiser running through a software renderer at two
+ * frames a second is pure cost, and worse, a suspended context that never
+ * resumes would sit in the survey's console as a warning nobody needs. `?sound=0`
+ * is the same switch for a human. */
+const audio = new Audio();
+const wantSound = qStr('sound', qStr('auto', '0') === '1' ? '0' : '1') === '1';
 /* Never less than this much water overhead. Six metres is enough that the
  * daylight term stays bounded and the vehicle reads as submerged; it also means
  * the exposure never has to cope with a breach it was not designed for. */
@@ -849,6 +861,12 @@ const game = {
   walk: () => enterWalk(), helm: () => enterHelm(), swim: () => enterSwim(),
   boatOrigin: () => vessel.pos.clone(),
   vessel: () => vessel,
+  /* The ear, exposed for the same reason `setLayer` is: switching a subsystem
+   * on from outside is how it gets measured. `tools/listen.mjs` starts the
+   * context itself and renders the graph offline, which is the only way to look
+   * at sound from a sandbox that has no sound card. */
+  audio: () => audio,
+  sound: (on) => (on ? audio.start() : audio.mute(true)),
   pose: (n) => { applyPose(n); },
   /* Put the camera at a named station inside the boat.
    *
@@ -1099,6 +1117,20 @@ function frame() {
     && eyeL.x * eyeL.x + eyeL.y * eyeL.y < (HULL_R + 0.35) * (HULL_R + 0.35);
   boat.mesh.visible = aboard;
 
+  /* Sound, and it reads the same `aboard` the cabin does.
+   *
+   * Deliberately not `game.mode`. The review cameras stand outside the boat
+   * without being in swim mode, and keying the interior off the mode is the
+   * exact mistake that put glowing plates on the outside of the hull — so one
+   * geometric test serves both the renderer and the ear. `eyeL.z` is the
+   * listener's station along the hull, which is what makes the pump loud in the
+   * machinery space and distant at the wheel. */
+  audio.update(dt, {
+    depth: game.depth, aboard, earZ: eyeL.z,
+    throttle: vessel.throttle, ballast: vessel.ballast, ballastCmd: vessel.ballastCmd,
+    way: vessel.way, grounded: vessel.grounded, contact: vessel.contact,
+  });
+
   renderer.info.reset();
   post.render(scene, camera, env);
 
@@ -1135,6 +1167,8 @@ function frame() {
            ['E', 'use'], ['V', 'exit at hatch'], ['L', 'lamp']]
         : [['W A S D', 'thrust'], ['Space / C', 'rise / sink'], ['Shift', 'transit'],
            ['V', 'back inside'], ['L', 'lamp'], ['H', 'hide this']];
+    // One line rather than three: mute belongs in every mode.
+    rows.push(['M', audio.muted ? 'sound — muted' : 'mute sound']);
     const html = rows.map(([k, v]) => `<div><b>${k}</b>${v}</div>`).join('');
     if (legend.dataset.sig !== html) { legend.dataset.sig = html;
       document.getElementById('legBody').innerHTML = html; }
@@ -1175,6 +1209,11 @@ function frame() {
         + `   hdg ${vessel.heading.toFixed(0)}   way ${vessel.way.toFixed(2)} m/s`,
       `throttle ${vessel.throttle.toFixed(2)}   ballast ${vessel.ballast.toFixed(2)}`
         + `   ${vessel.grounded ? 'AGROUND' : 'clear'}`,
+      /* Sound on the panel, because a game that is quiet because the context
+       * never resumed looks exactly like a game that is quiet because it is
+       * 400 m down. `creak/s` is the one number that says whether the hull
+       * *should* be talking, which makes "I hear nothing" answerable. */
+      audio.report(),
     ].join('\n');
   }
 }
@@ -1184,11 +1223,18 @@ function begin() {
   document.getElementById('boot').style.opacity = '0';
   setTimeout(() => { document.getElementById('boot').style.display = 'none'; }, 950);
   if (qStr('hud', '1') === '1') document.getElementById('hud').hidden = false;
+  /* The gesture. This click is the only moment a browser will let an
+   * AudioContext start, and the boot gate already had it. */
+  if (wantSound) audio.start();
   window.addEventListener('keydown', (e) => {
     if (e.code === 'KeyH') {
       const l = document.getElementById('legend');
       l.hidden = !l.hidden;
     }
+    /* M for mute, and it is a gain change rather than a teardown so the graph
+     * stays warm and unmuting is instant. Not bound to a movement key, for the
+     * same reason F3 is not. */
+    if (e.code === 'KeyM') audio.mute();
     /* F3 for the diagnostic panel. Chosen because every game uses it for exactly
      * this, so it needs no explaining, and because it is not a movement key —
      * a diagnostic bound to a letter gets pressed by accident while swimming. */

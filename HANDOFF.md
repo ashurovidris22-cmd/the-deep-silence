@@ -62,9 +62,21 @@ URL put a human's whole session at 14 m while they stood on the canyon floor.
 
 These cost real time to discover. Do not re-derive them.
 
-- **npm works** (network access was granted for `registry.npmjs.org`). Three.js is
-  **vendored** into `vendor/` so the site has no build step and no runtime CDN
-  dependency.
+- **npm access is granted per session and does not carry over.** A previous
+  session recorded "npm works" here; the next one opened a fresh clone and got
+  `403 Forbidden` on `registry.npmjs.org`, with `node_modules/` in .gitignore.
+  Every Playwright tool in `tools/` was unrunnable, and so was every arithmetic
+  test — which are the only valid way to measure anything with a time constant.
+  Ask for `registry.npmjs.org` *and* `cdn.playwright.dev` (the browser binary
+  comes from the second, not the first) at the start of a session that needs
+  frames, and do not assume it will be granted.
+- **`node tools/vendorlink.mjs` removes that dependency for node tests.** Three.js
+  is **vendored** into `vendor/` so the site has no build step and no runtime CDN
+  dependency — and `vendor/three.module.js` imports cleanly under node, so the
+  tool writes the eight lines of `node_modules/three` packaging that let a bare
+  `import 'three'` resolve. Offline, idempotent, called automatically by
+  `dyn.mjs` and `listen.mjs`. **A node arithmetic test now needs no network at
+  all.**
 - **The sandbox has no GPU and no display.** Local Playwright renders through
   SwiftShader: pixels are correct, timings are meaningless.
 - **Blender is not reachable and cannot be.** Blender MCP needs Blender open with
@@ -100,6 +112,9 @@ python3 -m http.server 8123          # serve
 node tools/survey.mjs --w 800 --h 450        # the whole review set, one boot
 node tools/sheet.mjs shots/[a-z]-*.png --out shots/_sheet.png
 node tools/shot.mjs --pairs "name=g.pose('deep');"   # arbitrary expression
+node tools/dyn.mjs                   # dynamics, as arithmetic. No browser.
+node tools/listen.mjs --mode graph   # the audio graph builds, structurally
+node tools/listen.mjs --mode render --scene descent   # real samples, needs a browser
 ```
 
 **The contact sheet is the point.** Both of the worst bugs in this project were
@@ -133,12 +148,33 @@ no renderer dependency for the same reason: the sandbox runs at 1–2 fps with `
 clamped, so eight seconds of wall clock is under a second of simulated time and
 *every* dynamics test has to run as pure maths at a fixed 60 Hz.
 
+**`tools/dyn.mjs` is that rule with a handle on it.** Eight scenarios driving the
+*real* `Vessel` at a fixed 60 Hz — derived constants, the ballast tank, a full
+descent, the telegraph, the blow, the silence on the floor, the descent/ascent
+asymmetry, and a released-voices check. It found two bugs on its first run and
+one of them was in the vessel, not in the new code. Add a scenario rather than
+reasoning about a time constant.
+
+**Sound is measured the same way, and for a stronger reason: there is no sound
+card here at all.** `src/acoustics.js` holds the whole state-to-parameter map as
+pure arithmetic with no `AudioContext` and no `three` in it, so `dyn.mjs` can
+print what the synthesiser is being told. `tools/listen.mjs` covers the other
+half in two honest modes — `--mode graph` builds the graph against a stub and
+proves the code path runs and no automation gets a NaN; `--mode render` rebuilds
+it inside an `OfflineAudioContext` in headless Chromium, which renders faster
+than real time, and reports RMS, peak, crest factor, clipping and energy per
+octave. **`graph` mode prints a banner saying what it did not establish, because
+a structural pass that looks like a measurement is worse than no pass at all.**
+
 ---
 
 ## 5. Architecture
 
 ```
+src/hull.js       the five principal dimensions, and no imports at all
 src/jerlov.js     seawater optics constants, with provenance
+src/acoustics.js  underwater acoustics constants + the state-to-sound map. Pure
+src/audio.js      the synthesiser: owns the AudioContext, decides nothing
 src/glsl.js       shared GLSL: noise, the water model, caustics, phase function
 src/loft.js       profile sweeping — the technique that beats stacked primitives
 src/terrain.js    the canyon: shelf, wall, floor. seabedHeight(), lightAt()
@@ -367,6 +403,52 @@ against the drawn profile, tightest clearance +65 mm. For a question of the form
 "is this inside that", a number is a stronger answer than a frame — and it costs
 a second instead of four minutes.
 
+### Added by the sound pass
+
+All three of these were found by arithmetic, and the first two were found before
+a single sample had been synthesised. That is the whole argument for building the
+mapping layer as pure numbers.
+
+- **A hull's low modes are infrasonic, and the film soundtrack is wrong.** The
+  first draft gave the descending groan to the ring-stiffener modes on the
+  assumption that a pressure hull's lowest note is a few tens of Hz. Measured at
+  this boat's radius, `ringMode(2)` is **11.3 Hz** and the next is 32 — and it
+  was weighted at 72% of every descending event, so **descent would have sounded
+  like nothing** and the search would have started in the audio graph. `R⁴` in
+  the denominator is brutal; a real submarine carries heavy ring frames precisely
+  because a 2.35 m shell is that floppy in bending. What is actually audible is
+  the shell's ring frequency `c_L/(2πR)` = **358 Hz** and the 0.6 m plate modes
+  at 216/540/863 Hz. The 11 Hz number is kept in the file as `OVALLING` because
+  it is the reason the low end of a creak comes from the transient's onset rather
+  than from a resonance.
+- **The ballast tank answered in one second, not eight.** `BALLAST_RATE = 1/8`
+  was then multiplied by 8 inside the exponential, so the rate was applied twice
+  and cancelled: measured τ = 1.00 s against an intent stated in `vessel.js`'s own
+  header, in the README and in this file. **An eightfold error survived because a
+  one-second lag still feels like a lag** — the whole "every depth command is
+  committed long before it answers" argument was not actually in the build, and
+  only a number could show it. Now 8.02 s measured, 95% at 24 s. Found while
+  asking how long the ballast hiss should last, which is the sound layer
+  measuring the vessel.
+- **A continuous voice keyed to a quantity that only asymptotes to zero never
+  switches off.** The bottom scrape was proportional to `|way|`, and a hull
+  aground on a slope never quite stops — she settles at 17 mm/s and stays there,
+  so the voice sat at 0.0017 for ever. Inaudible, unfindable, and precisely how a
+  synthesiser acquires a permanent whisper nobody can trace. The physical answer
+  is also the right one: sliding friction has a breakaway threshold, so below
+  8 cm/s the correct level is exactly zero rather than nearly zero. **Every
+  continuous voice needs a gate at the threshold of audibility**, and
+  `tools/dyn.mjs` has a released-voices scenario now because nothing else was
+  ever going to catch this.
+- **`AudioParam` has no `.context`.** Reaching for one to get `currentTime`
+  yielded `undefined`, so every parameter change was scheduled at time zero.
+  It works in Chrome — a start time in the past means "now" — which is exactly
+  the kind of accident that survives until a browser tightens up. Pass the time.
+- **A peaking filter in parallel with its own dry path is +6 dB.** It already
+  passes the whole signal and adds a bump; hanging it alongside doubles
+  everything below the bump and gets the level wrong before the budget has had a
+  chance to be obeyed. In series.
+
 ### Added by the piloting pass
 
 - **Caustics were riding on the bio floor, so they never switched off.**
@@ -536,27 +618,73 @@ turning circle at full rudder, 1.8 m/s vertical when hard blown so the 400 m
 from the floor to the shelf takes roughly four minutes.
 
 **Helm controls:** W/S telegraph, A/D wheel, Space/C blow/flood, Shift for a
-faster telegraph, X all stop, E to stand up.
+faster telegraph, X all stop, E to stand up. **M mutes.**
+
+**She has a voice now.** `src/acoustics.js` + `src/audio.js`, and the same rule as
+the water: the noise floor is not chosen, it is computed. Every frequency comes
+from a dimension or a material property already in the project — the shell rings
+at `c_L/(2πR)` = 358 Hz, the cabin's air hums at the beam of the boat (36.5 Hz,
+while the 18 m length is 9.5 Hz and inaudible, which is why walking forward does
+not change it), the pump's blade note is 5 blades × 1450 rpm = 121 Hz against a
+fixed 100 Hz mains hum, and the ballast bubbles sit at the Minnaert frequency for
+the *current* pressure, so a blow climbs from 1.6 kHz at the surface to 10.6 kHz
+on the floor on its own. Three numbers in the file are judgement calls and they
+are labelled and grouped, in the same spirit as `Env.scatterGain`.
+
+Six voices, each tied to a physical cause, and two of them are instruments:
+
+- **The creak rate is driven by dP/dt, not by pressure.** A hull at rest at 400 m
+  is in equilibrium and quiet: 1 creak per 25 s. The same hull descending at
+  1.81 m/s is redistributing stress through every weld: 3.1 per second. Holding
+  depth is calm and committing to the bottom is not, and it costs one term.
+- **Descent and ascent do not sound alike.** Increasing compression loads the
+  whole shell, so it answers low and rings on; relaxing lets single panels go,
+  which is short and high. Measured 74% groan going down, 25% going up — **you
+  can hear which way you are moving with your eyes shut.**
+- **The ballast hiss is the gauge for a tank you cannot see.** Gain comes straight
+  from `ballastCmd - ballast`, so a 1.2 s press is audible for 26 s and stops when
+  the transfer actually finishes.
+- **Outside the hull is not muffled, it is unlocalised.** Thorp says the sea is
+  transparent over the 20 m this game can see — 0.0014 dB — so the change when
+  your head leaves the boat is the *ear*: the middle ear is bypassed, bone
+  conduction takes the top off, and interaural time difference shrinks by the
+  sound-speed ratio 4.4, so localisation fails. Loud, close, and coming from
+  nowhere is both true and worse than muffled.
+
+Interior versus water is gated on the **geometry** — the same `aboard` test the
+cabin's visibility uses — never on `game.mode`, because the review cameras stand
+outside the boat without being in swim mode.
+
+Loudness budget, measured rather than intended: the floor at rest sits at 0.040
+against a grounding at 0.55, which is 15 dB under the quietest creak. **A sound is
+only frightening against silence**, so that table in `acoustics.js` is a gate.
 
 ## 8. What to do next, in order
 
-Nothing here is blocked and nothing is half-finished. Pick from the top.
-
-1. **Sound.** Hull creak under pressure, the pump note changing with the
-   telegraph, the ballast blow. This would do more for tension than another
-   hundred panel details, and the vessel already publishes every value a sound
-   layer needs: depth, pressure, throttle, ballast, `vessel.contact` on grounding.
-2. **Creatures.** Deliberately deferred until now because procedural organics are
-   the hardest thing in the project, and there is finally headroom for them —
-   183 fps leaves room. Technique is known and written down: a sine along the
-   spine in the vertex shader, Verlet chains for tentacles, a radial pulse for
-   jellyfish. The scariest creature is the slowest, which is also the cheapest to
-   animate.
-3. **A reason to go down.** She can be driven, the depth zones exist and the
-   pressure model is real, but nothing asks the player to use any of it. This is
-   a design gap, not a rendering one, and it is the largest thing standing
+1. **Listen to it.** The sound layer has never been *heard*. It was built and
+   measured in a session where `registry.npmjs.org` answered 403, so there was no
+   browser: `tools/dyn.mjs` verifies every time constant, `listen.mjs --mode
+   graph` verifies the graph builds with no NaNs and no leaked voices, and
+   **nothing has rendered a single sample.** First job of the next session with
+   network: `npm i playwright && npx playwright install chromium`, then
+   `node tools/listen.mjs --mode render --scene descent` (and `plant`, `blow`,
+   `silence`, `water`), then put headphones on. Expect the balance to need work —
+   the numbers are right, which is not the same as sounding right.
+2. **Re-run the visual survey.** Also blocked this session. The sound pass
+   touched `main.js`, `index.html` and `fitout.js`'s export block, so the frames
+   should be identical and that has not been confirmed. `node tools/survey.mjs
+   --w 800 --h 450` then the contact sheet.
+3. **Creatures.** Procedural organics are the hardest thing in the project and
+   there is finally headroom — 183 fps leaves room. Technique is known and written
+   down: a sine along the spine in the vertex shader, Verlet chains for tentacles,
+   a radial pulse for jellyfish. The scariest creature is the slowest, which is
+   also the cheapest to animate. **They now have a soundscape to arrive into**,
+   and a creature you hear before you see is a different animal.
+4. **A reason to go down.** She can be driven, the depth zones exist, the pressure
+   model is real and now audible, but nothing asks the player to use any of it.
+   This is a design gap, not a rendering one, and it is the largest thing standing
    between "impressive" and "a game".
-4. **Interior polish, the known weak spots.** The mess table and the galley
+5. **Interior polish, the known weak spots.** The mess table and the galley
    counter still read as plain boxes at two metres and want the edge treatment
    the lockers got. The cabin is lit toward the top of its value range and could
    stand more darkness between the lamps.
@@ -569,6 +697,17 @@ Nothing here is blocked and nothing is half-finished. Pick from the top.
 - **The turf is only just legible** at the shelf camera's height.
 - **`g.outside()` leaves `game.mode` alone,** so the diagnostic panel reports
   `mode walk` while the review camera is outside the boat. Harness-only cosmetic.
+- **The bed's low rumble does not fade with depth,** by design — Wenz's low band
+  is roughly depth-blind while surface agitation is not, which is what takes the
+  hiss away over a descent. But the exponential that does the fading has no
+  citation behind it; it is one of the three labelled judgement calls.
+- **No spatialisation.** Losing localisation outside the hull is implemented as a
+  shift from direct to diffuse rather than with real panning, which is the honest
+  cheap version of the effect and may be enough. If creatures need a direction,
+  that is when to reach for `PannerNode`.
+- **The dive-band keys `[` and `]` are still advertised on the boot card** but the
+  band is review-only now and gated behind `auto=1`. Cosmetic, and it predates
+  this pass.
 
 **How this user gives feedback, and it is good feedback:** blunt, specific, and
 usually right. They play the build and report what broke. Take the complaint

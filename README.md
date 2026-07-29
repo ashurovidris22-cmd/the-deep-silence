@@ -7,9 +7,11 @@ Visual target: the look of **SOMA**. Tension target: the systemic dread of
 **Barotrauma** — a thin metal hull, a finite power budget, and pressure that only
 ever increases. Not Barotrauma's art style.
 
-**Status: phase 1 — water.** The optics, the seabed, the silhouette layer and the
-post chain exist. The submersible, its interior, the pressure systems and the
-inhabitants do not yet.
+**Status: she can be driven, walked around inside, and heard.** The optics, the
+seabed, the flora, the post chain, a furnished eighteen-metre pressure hull, the
+vessel dynamics and the sound layer all exist. The inhabitants do not yet — and
+nothing yet asks the player to go down, which is the largest gap and it is a
+design gap rather than a rendering one.
 
 ## Why the water is not art-directed
 
@@ -44,7 +46,10 @@ olive while anything further has had the red taken out of it.
 
 ```
 index.html          entry point; reads state from URL params
+src/hull.js         the five principal dimensions, and no imports at all
 src/jerlov.js       seawater optics constants, depth zones, pressure
+src/acoustics.js    underwater acoustics, and the state-to-sound map. Pure maths
+src/audio.js        the synthesiser: owns the AudioContext, decides nothing
 src/glsl.js         shared GLSL: noise, the water model, phase function
 src/terrain.js      seabed heightfield (CPU, for exact normals) + the light ramp
 src/props.js        kelp and boulders — the silhouette layer
@@ -71,6 +76,7 @@ Take the seat at the bow with **E**, and then:
 | `Shift` | move the telegraph faster |
 | `X` | all stop |
 | `E` | stand up. She keeps whatever way you left on |
+| `M` | mute |
 
 Three things make her a vessel rather than a flying box. Vertical is ballast,
 not thrust, so every depth command is committed long before it answers. A rudder
@@ -81,6 +87,42 @@ at the pumps, and she is still making way toward whatever is in front of her.
 Walking happens in the hull's own coordinates now, with the camera composed
 through the vessel's matrix, which is what lets the deck move and turn under
 your feet.
+
+## Why the sound is not art-directed either
+
+Same argument as the water, and it pays off the same way. No samples — the
+no-assets rule covers audio, so every voice is an oscillator, a filter, or a
+buffer of seeded noise. Every frequency comes from a dimension or a material
+property that was already in the project:
+
+| what you hear | where it comes from |
+|---|---|
+| the shell ringing, 358 Hz | `c_L / (2πR)`, the textbook ring frequency of a cylindrical shell |
+| plate cracks at 216 / 540 / 863 Hz | flexural modes of a 0.6 m strake at 12 mm — the same panel the interior material dishes for its oil-canning |
+| the cabin's hum, 36.5 Hz | a standing wave across the 4.7 m beam |
+| the pump, 121 Hz sliding | 5 blades × 1450 rpm, against a *fixed* 100 Hz mains hum |
+| the ballast blow, 1.6 → 10.6 kHz | Minnaert resonance of a 2 mm bubble, which goes as √P |
+
+That last row is the one no sound designer would think to do. A bubble is stiffer
+under pressure, so **a blow gets shriller the deeper you are** — and once it is
+there, the ballast tells you your depth without a gauge.
+
+Two of the voices turned out to be instruments rather than decoration. The creak
+rate is driven by the *rate of change* of pressure rather than by pressure, so a
+hull at rest at 400 m is quiet (one creak per 25 s) and the same hull descending
+at 1.8 m/s is not (three per second) — holding depth is calm, committing to the
+bottom is not. And because compression loads the whole shell while relaxation
+lets single panels go, descending sounds low and ascending sounds high: you can
+hear which way you are moving with your eyes shut.
+
+The thing that is *not* modelled is the obvious one. Sound barely attenuates in
+seawater — Thorp gives 0.0014 dB over the twenty metres this game can see — so
+the water does not muffle anything, and pretending otherwise would be the audio
+equivalent of tinting an oceanic palette green. What actually changes when your
+head leaves the hull is your ear: the middle ear is bypassed, bone conduction
+takes the top off, and interaural time difference shrinks by the sound-speed
+ratio of 4.4, so localisation fails. Outside the boat everything is loud, close,
+and coming from nowhere. That is true, and it is worse than muffled.
 
 ## Why the canyon floor has no plants on it
 
@@ -141,10 +183,15 @@ systematically instead:
 | `tools/shot.mjs` | capture an arbitrary expression — the bisection tool |
 | `tools/survey.mjs` | the whole review set from one boot |
 | `tools/sheet.mjs` | tile frames into one contact sheet |
+| `tools/dyn.mjs` | dynamics as arithmetic, at a fixed 60 Hz. No browser |
+| `tools/listen.mjs` | the audio graph: structurally, or as rendered samples |
+| `tools/vendorlink.mjs` | make the vendored three.js importable from node, offline |
 
 ```
 node tools/survey.mjs --w 800 --h 450
 node tools/sheet.mjs shots/[a-l]-*.png --out shots/_sheet.png
+node tools/dyn.mjs
+node tools/listen.mjs --mode graph
 ```
 
 The contact sheet is the point. A reviewer shown one frame comments on that
@@ -190,6 +237,22 @@ Kept because each one cost real time and each will recur.
 - **A shader that fails to compile renders nothing and reports nothing.** One
   duplicated variable name took out the whole interior; the survey produced
   thirty frames and ten of them were the seabed, with the draw counts unchanged.
+- **A hull's low modes are infrasonic, and the film soundtrack is wrong.** The
+  descending groan was given to the ring-stiffener modes on the assumption that a
+  pressure hull's lowest note is a few tens of Hz. At this boat's radius that mode
+  is 11 Hz — below hearing — and it had been weighted at 72% of every descending
+  event, so descent would have sounded like nothing. `R⁴` in the denominator is
+  brutal. What is audible is the shell's ring frequency and the plate modes.
+- **The ballast tank answered in one second, not eight.** A rate of `1/8` was then
+  multiplied by 8 inside the exponential, cancelling itself, against an intent
+  stated in three separate documents. It survived because a one-second lag still
+  *feels* like a lag — only a measurement could show that the commitment the whole
+  design rests on was not in the build.
+- **A continuous voice keyed to a quantity that only asymptotes to zero never
+  switches off.** A bottom scrape proportional to speed sat at 0.0017 for ever,
+  because a hull aground on a slope never quite stops. Inaudible, unfindable, and
+  exactly how a synthesiser acquires a permanent whisper. Sliding friction has a
+  breakaway threshold, so below it the right level is *exactly* zero.
 
 ## Licence
 

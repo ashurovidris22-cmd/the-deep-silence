@@ -143,8 +143,16 @@ export class Vessel {
   }
 
   update(dt, ceilingY) {
-    // --- ballast, with its lag. Everything vertical follows from this.
-    this.ballast += (this.ballastCmd - this.ballast) * (1 - Math.exp(-dt * BALLAST_RATE * 8));
+    /* --- ballast, with its lag. Everything vertical follows from this.
+     *
+     * The `* 8` that used to be here cancelled the `/ 8` in BALLAST_RATE and the
+     * tank answered in one second, not eight — an eightfold error against an
+     * intent stated in this file's own header, in the README and in the handoff.
+     * It went unnoticed because a one-second lag still *feels* like a lag; you
+     * have to measure it to see that the commitment the design is built on was
+     * not there. Found by `tools/dyn.mjs` while checking how long the ballast
+     * hiss should last, which is the sound layer measuring the vessel. */
+    this.ballast += (this.ballastCmd - this.ballast) * (1 - Math.exp(-dt * BALLAST_RATE));
     const netBuoy = (0.5 - this.ballast) * 2 * BUOYANCY;
 
     // --- surge
