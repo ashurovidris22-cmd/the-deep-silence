@@ -213,6 +213,173 @@ float phaseHG(float cosT, float g){
 }
 `;
 
+/** The lamp: one owner for the cone, and the occlusion test that goes with it.
+ *
+ * Before this chunk existed the cone falloff was written out ten times across
+ * six files - flora four times, props twice, and once each in post, snow,
+ * structures and terrain - and every copy declared its own uniform block. They
+ * had already drifted: all six sets of defaults still said cos(0.42), intensity
+ * 90 and softness 0.30, while the live values in Env are cos(0.74), 900 and
+ * 0.34. Nothing showed, because Env.applyTo overwrites them every tick - but a
+ * material that ever failed to register would have rendered a 24 degree cone at
+ * a tenth of the intensity, and looked merely wrong rather than broken.
+ *
+ * Attenuation is deliberately NOT folded in here. The three forms in the
+ * codebase differ for reasons rather than by drift: surfaces use 1/(6 + d^2)
+ * where the 6 is a finite lens rather than a mathematical point, the volumetric
+ * march uses 1/(1 + 0.9 d^2), and marine snow uses 1/(1 + 4.5 d^2) to keep
+ * particles from lighting up across the whole beam. One owner per fact means
+ * one owner for the cone; it does not mean pretending three facts are one.
+ */
+export const LAMP = /* glsl */`
+uniform vec3 uLampPos;
+uniform vec3 uLampDir;
+uniform vec3 uLampCol;
+uniform float uLampInt;
+uniform float uLampCos;
+uniform float uLampSoft;
+
+uniform sampler2D uShadowMap;
+uniform mat4 uLampVP;
+uniform float uShadowSize;
+uniform float uShadowTanHalf;
+uniform float uShadowNear;
+uniform float uShadowFar;
+uniform float uShadowOn;
+uniform float uShadowBiasScale;
+
+/* The cone. Brightest on axis, zero at uLampCos - uLampSoft brightens the core
+ * inward, it does not widen the edge. */
+float lampCone(vec3 L){
+  return smoothstep(uLampCos, uLampCos + uLampSoft, dot(-L, normalize(uLampDir)));
+}
+
+// Stored depth -> metres along the lamp's forward axis.
+float lampLinear(float d){
+  float z = d * 2.0 - 1.0;
+  return (2.0 * uShadowNear * uShadowFar) /
+         (uShadowFar + uShadowNear - z * (uShadowFar - uShadowNear));
+}
+
+/* Is this point lit by the lamp, or is something in the way?
+ * Returns 1 for lit, 0 for fully occluded.
+ *
+ * The comparison is done in metres rather than in depth-buffer units, so the
+ * bias below can be a real distance derived from real geometry instead of a
+ * magic constant.
+ *
+ * Bias is slope-scaled, and the scale is the texel's own footprint. One texel
+ * covers 2*d*tan(half)/N metres at distance d - 1.8 cm at ten metres on a
+ * 1024 map - and a surface tilted by theta rises by that footprint times
+ * tan(theta) across it, which is exactly the depth difference that shows up as
+ * acne. The clamp on that slope term is stated once, at the line that applies
+ * it, and deliberately not repeated here: this comment said four texels while
+ * the code said twelve for as long as both existed, which is one fact written
+ * down in two places and then allowed to disagree with itself. */
+float lampShadow(vec3 worldPos, vec3 n){
+  if(uShadowOn < 0.5) return 1.0;
+  /* ?shadows=2 forces full occlusion. A bisect handle, not a feature: if the
+   * frame does not change with this on, the fault is upstream of the lookup -
+   * the uniforms are not arriving - and no amount of staring at the projection
+   * maths will find it. */
+  /* Note the upper bound. Without it this early-out swallows every mode above
+   * it, and modes 3, 4 and 5 below are unreachable code that silently reports
+   * mode 2's answer instead - which is exactly what happened, three times, and
+   * was read as three independent confirmations. */
+  if(uShadowOn > 1.5 && uShadowOn < 2.5) return 0.0;
+
+  /* Normal offset, sized by the texel's own footprint at this distance.
+   *
+   * Moving the sample point off the surface along its normal is what actually
+   * cures grazing-angle acne; depth bias alone cannot, because at 85 degrees
+   * the depth error across one texel is larger than any bias small enough to
+   * keep contact shadows attached. Two texels of offset is the standard figure
+   * and is a real distance here: 3.6 cm at ten metres on a 1024 map. */
+  float d0 = distance(uLampPos, worldPos);
+  float texel0 = 2.0 * d0 * uShadowTanHalf / uShadowSize;
+  vec4 lp = uLampVP * vec4(worldPos + n * texel0 * 2.0, 1.0);
+  if(lp.w <= 0.0) return 1.0;                 // behind the lamp
+  vec3 ndc = lp.xyz / lp.w;
+  if(any(greaterThan(abs(ndc.xy), vec2(1.0)))) return 1.0;   // outside the map
+  vec2 uv0 = ndc.xy * 0.5 + 0.5;
+
+  float dist = lp.w;                          // metres along the lamp axis
+  if(dist >= uShadowFar) return 1.0;          // past the visibility limit
+
+  /* ?shadows=4 returns the stored depth itself as the light factor.
+   *
+   * Mode 2 returns above all three early-outs, so it can only show that the
+   * uniforms arrive and that the pixel is lamp-lit. It cannot tell an empty
+   * shadow map from a full one - and an EMPTY map is the dangerous case,
+   * because it holds 1.0 everywhere, so every depth test passes and every
+   * pixel comes out lit, which is indistinguishable from "nothing is occluding
+   * anything". Under this mode an empty map darkens nothing at all while a
+   * populated one paints a gradient, so the two finally separate. */
+  if(uShadowOn > 5.5){
+    /* ?shadows=6 asks whether the map and the matrix that reads it agree.
+     *
+     * A lamp-lit floor pixel is, by definition, the nearest surface along its
+     * own ray from the lamp, so the depth pass must have written that pixel's
+     * OWN depth into the map. Comparing the stored value against ndc.z from the
+     * same uLampVP tests exactly that, and does it in window units, so it is
+     * immune to any disagreement about near, far or fov between the pass camera
+     * and these uniforms - which a comparison in metres is not. Dark means the
+     * map disagrees with its own matrix, i.e. the two are not the same camera. */
+    float own = ndc.z * 0.5 + 0.5;
+    float stored = texture2D(uShadowMap, uv0).x;
+    return abs(stored - own) < 0.002 ? 1.0 : 0.0;
+  }
+  if(uShadowOn > 4.5){
+    /* ?shadows=5 is a picture of the map's CONTENTS: black wherever the stored
+     * depth is nearer than the far plane, i.e. wherever a caster was actually
+     * drawn into the map, and unchanged where the map is still at its cleared
+     * value. Mode 4 gives the depth as a brightness, which is ambiguous at both
+     * ends; this one answers the single question "was anything rendered here". */
+    return step(0.999, texture2D(uShadowMap, uv0).x);
+  }
+  if(uShadowOn > 3.5) return texture2D(uShadowMap, uv0).x;
+
+  /* ?shadows=3 darkens everything the map actually covers, whatever the depth
+   * test then says: its footprint on screen, and nothing else. */
+  if(uShadowOn > 2.5) return 0.0;
+
+  vec3 L = normalize(uLampPos - worldPos);
+  float ndl = clamp(dot(n, L), 0.0, 1.0);
+  float texelWorld = 2.0 * dist * uShadowTanHalf / uShadowSize;
+  float slope = sqrt(max(0.0, 1.0 - ndl*ndl)) / max(ndl, 0.05);
+  /* Twelve texels, not four.
+   *
+   * Four was chosen on the argument that by 85 degrees of incidence the ndl
+   * term has taken the light to nothing anyway, so the shortfall could not
+   * show. That argument came from Lambert, and the seabed does not use Lambert:
+   * silt is dusty and has no hard terminator, so terrain.js wraps the diffuse
+   * as (dot(n,L)+0.28)/1.28, which is still 0.22 at ninety degrees. The light
+   * was very much still there, and so was the acne - a measured 26 percent of
+   * the floor frame, which vanished when the bias was raised, which is the
+   * signature of a bias failure rather than a shadow.
+   *
+   * Twelve is the measured requirement at 85 degrees (11.4), rounded up. */
+  float bias = (texelWorld * min(slope, 12.0) + texelWorld * 0.5) * uShadowBiasScale;
+
+  vec2 uv = uv0;
+  vec2 texel = vec2(1.0 / uShadowSize);
+
+  /* 3x3 PCF. Not for softness - the penumbra it invents is 5 cm at ten metres,
+   * while the 18 cm lens of a real flood would cast 72 cm at the same distance,
+   * so this is thirteen times too hard to be mistaken for physics. It is here
+   * to hide the texel grid on the edge, and the honest soft shadow is a
+   * separate job. */
+  float lit = 0.0;
+  for(int y = -1; y <= 1; y++){
+    for(int x = -1; x <= 1; x++){
+      float s = texture2D(uShadowMap, uv + vec2(float(x), float(y)) * texel).x;
+      lit += (dist - bias <= lampLinear(s)) ? 1.0 : 0.0;
+    }
+  }
+  return lit / 9.0;
+}
+`;
+
 /** Fullscreen triangle. One vertex shader for every post pass. */
 export const FS_VERT = /* glsl */`
 varying vec2 vUv;
