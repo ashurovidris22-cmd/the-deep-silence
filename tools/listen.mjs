@@ -234,15 +234,29 @@ async function graphMode() {
 /* =================================================================== render */
 
 async function renderMode() {
-  let chromium;
-  try { ({ chromium } = await import('playwright')); } catch {
+  /* Import boot.mjs BEFORE anything touches playwright.
+   *
+   * Playwright builds its browser registry at module-load time from the
+   * environment, so boot.mjs's cache discovery only takes effect if boot.mjs
+   * is the thing that imports it. This function used to import playwright here
+   * and boot.mjs fifteen lines later, which is why every survey launched fine
+   * and this one alone insisted the browser was not installed — the driver was
+   * already resolved against the wrong cache by the time the fix ran. */
+  let launch;
+  try { ({ launch } = await import('./boot.mjs')); } catch {
     console.log('\n  playwright is not installed, so there is no browser to render in.');
     console.log('  npm install playwright && npx playwright install chromium');
     console.log('  Falling back to --mode graph would prove something weaker; not doing it silently.\n');
     return 2;
   }
-  const { GPU_ARGS } = await import('./boot.mjs');
-  const browser = await chromium.launch({ headless: true, args: GPU_ARGS });
+  /* One owner for how a browser gets started.
+   *
+   * This used to import GPU_ARGS and call chromium.launch itself, which meant
+   * two places knew how to launch and only one of them learned anything. When
+   * boot.mjs gained the browser-cache discovery that a driver-without-binaries
+   * machine needs, every survey worked and this one alone still said "run npx
+   * playwright install". Same bug shape as the two scene tables in this file. */
+  const browser = await launch();
   const page = await browser.newPage();
   page.on('pageerror', (e) => console.log('  [pageerror]', e.message));
   page.on('console', (m) => { if (m.type() === 'error') console.log('  [console]', m.text()); });
