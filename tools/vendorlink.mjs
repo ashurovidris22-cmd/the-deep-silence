@@ -19,9 +19,10 @@
  *   node tools/vendorlink.mjs      # standalone
  *   import { ensureThree } from './vendorlink.mjs'; ensureThree();
  */
-import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { createRequire } from 'node:module';
+import { dirname, join, sep } from 'node:path';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -60,6 +61,27 @@ const PW_PKG = JSON.stringify({
 
 const PW_INDEX = "export * from '../../tools/cdp.mjs';\nexport { default } from '../../tools/cdp.mjs';\n";
 
+/* Where node would actually find playwright, ignoring anything we wrote
+ * under ROOT. Returns { path, version } for a real install, else null.
+ *
+ * The check this backs asked existsSync on one directory, which is not the
+ * question. Node resolves a bare specifier by walking node_modules upward, so
+ * a driver installed anywhere above ROOT is importable — and a shim written
+ * under ROOT shadows it, turning a working driver into a dead one. Measured on
+ * the machine that found this: playwright 1.45.0 sat in /vercel/sandbox/
+ * node_modules while this function cheerfully wrote the stand-in over it. */
+function realPlaywright() {
+  for (const from of [join(ROOT, 'noop.js'), join(ROOT, '..', 'noop.js')]) {
+    try {
+      const p = createRequire(from).resolve('playwright/package.json');
+      if (p.startsWith(join(ROOT, 'node_modules') + sep)) continue;  // ours, not evidence
+      const v = JSON.parse(readFileSync(p, 'utf8')).version;
+      if (v !== '0.0.0-cdp-shim') return { path: p, version: v };
+    } catch { /* not resolvable from here, try the next start point */ }
+  }
+  return null;
+}
+
 /**
  * Point the bare specifier `playwright` at the local CDP shim.
  *
@@ -74,6 +96,20 @@ const PW_INDEX = "export * from '../../tools/cdp.mjs';\nexport { default } from 
 export function ensurePlaywright(verbose = false) {
   const dir = join(ROOT, 'node_modules', 'playwright');
   const pkg = join(dir, 'package.json');
+
+  const real = realPlaywright();
+  if (real) {
+    const stale = existsSync(pkg)
+      && JSON.parse(readFileSync(pkg, 'utf8')).version === '0.0.0-cdp-shim';
+    if (stale) {
+      rmSync(dir, { recursive: true, force: true });
+      if (verbose) console.log(`  vendorlink: removed a shim that was shadowing playwright ${real.version}`);
+    } else if (verbose) {
+      console.log(`  vendorlink: playwright ${real.version} is installed - standing down`);
+    }
+    return false;
+  }
+
   if (existsSync(pkg)) {
     const j = JSON.parse(readFileSync(pkg, 'utf8'));
     if (j.version !== '0.0.0-cdp-shim') return false;   // a real one: leave it

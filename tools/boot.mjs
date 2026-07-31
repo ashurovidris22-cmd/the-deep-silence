@@ -13,9 +13,47 @@
  * covering the fifteen methods this harness actually uses. Either way the import
  * below succeeds, which is the point: no tool in here should be stopped by a
  * registry. */
+import { existsSync, realpathSync } from 'node:fs';
+import { join, sep } from 'node:path';
 import { ensurePlaywright } from './vendorlink.mjs';
 
+/* Point playwright at the browsers that are actually on this machine.
+ *
+ * Playwright derives its browser cache from HOME. On the machine this was
+ * written for, HOME said /home/vercel-sandbox while the cache sat in
+ * /vercel/sandbox/.cache — so the driver AND the exact revision it asks for
+ * (chromium-1124) were both present and it still refused to launch, telling us
+ * to run `npx playwright install` with no registry to install from.
+ *
+ * `chromium` on PATH turned out to be a symlink straight into that cache,
+ * which is what identified it. Derived from the filesystem, not hardcoded: the
+ * root differs per machine and a literal path here would be wrong by the next
+ * session. If the browser found is not inside an ms-playwright cache it is
+ * still usable through executablePath, so it is recorded rather than dropped. */
+function ensureBrowsersPath() {
+  if (process.env.PLAYWRIGHT_BROWSERS_PATH) return;
+  const MARK = `${sep}ms-playwright${sep}`;
+  let plain = null;
+  for (const name of ['chromium', 'chrome', 'google-chrome', 'chromium-browser']) {
+    for (const d of (process.env.PATH || '').split(':')) {
+      if (!d) continue;
+      const p = join(d, name);
+      if (!existsSync(p)) continue;
+      let real;
+      try { real = realpathSync(p); } catch { continue; }
+      const i = real.indexOf(MARK);
+      if (i >= 0) {
+        process.env.PLAYWRIGHT_BROWSERS_PATH = real.slice(0, i + MARK.length - 1);
+        return;
+      }
+      plain ||= real;
+    }
+  }
+  if (plain && !process.env.CHROME_PATH) process.env.CHROME_PATH = plain;
+}
+
 ensurePlaywright();
+ensureBrowsersPath();
 const { chromium } = await import('playwright');
 
 export const GPU_ARGS = [
@@ -30,7 +68,12 @@ export const GPU_ARGS = [
 ];
 
 export async function launch(opts = {}) {
-  return chromium.launch({ headless: true, args: GPU_ARGS, ...opts });
+  // Only when there is no cache to resolve from: a bundled browser is matched
+  // to the driver and must win over whatever is loose on PATH.
+  const exe = !process.env.PLAYWRIGHT_BROWSERS_PATH && process.env.CHROME_PATH
+    ? { executablePath: process.env.CHROME_PATH }
+    : {};
+  return chromium.launch({ headless: true, args: GPU_ARGS, ...exe, ...opts });
 }
 
 export async function newPage(browser, { w = 1600, h = 900, dpr = 1 } = {}) {
