@@ -995,10 +995,13 @@ only frightening against silence**, so that table in `acoustics.js` is a gate.
 Recorded because the art direction in section 1 asks for things that are simply
 absent, and a reader could otherwise assume they are present and subtle.
 
-- **There are no shadows. Not one shadow map anywhere in `src/`.** Section 1 says
-  "few light sources, heavy bloom, visible volumetric cones, everything else in
-  shadow" — the last clause is not implemented. Nothing occludes light; the scene
-  holds together on extinction and fog alone.
+- **The head-mounted lamp now has one 1024² shadow projector.** The pass is
+  opt-in for real geometry, costs six draws at the canyon-floor review pose, and
+  is exposed through `?shadows=0`, `?shadowsize=`, and `?shadowbias=` for
+  measurement. Because the lamp is nearly coaxial with the eye, most cast shadows
+  hide behind their occluders; the measured exception is the catwalk grating,
+  whose slots let the eye and lamp rays separate. Alpha-cutout flora does not cast
+  yet, because the depth pass would otherwise draw solid billboard rectangles.
 - **No temporal filter.** `post.js` says so in its own comment, and pays for it:
   it uses white noise rather than interleaved gradient noise specifically because
   there is nothing to average the structure away. Measured, the grain is +-80 on a
@@ -1041,10 +1044,12 @@ that frame that cannot be right.
    anyway, and the wrist unit's bearing arrow is what actually prevents getting
    lost. The arrow is verified working: bearing 042°, range 45 m, checked against
    the geometry by hand.
-4. **Shadows.** One shadow-casting projector on the lamp. Largest visual return
-   available, affordable four times over — see the end of section 7 for the
-   measurements. Everything else on that list (a temporal filter, more marine snow,
-   contact shadows) is cheaper and worth less.
+4. **Judge the new lamp shadow on hardware.** The projector is wired and the
+   catwalk occlusion is measured, while the arithmetic and sound gates remain
+   identical. Confirm that the moving grating shadow reads naturally at full
+   quality. If stronger shadow composition is wanted, change the rig or scene
+   geometry rather than tuning bias: the nearly coaxial lamp correctly hides most
+   shadows behind their casters.
 5. **Creatures — read `DESIGN-CREATURES.md` before starting.** That file is a
    design conversation rather than a decision, but its arithmetic is checked and it
    changes the order of the work. Four things to know first:

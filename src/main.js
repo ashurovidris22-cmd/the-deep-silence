@@ -14,6 +14,7 @@ import { buildExterior } from './exterior.js';
 import { Audio } from './audio.js';
 import { Life } from './life.js';
 import { FS_VERT, WATER } from './glsl.js';
+import { LampShadow, castsShadow } from './shadow.js';
 
 const qs = new URLSearchParams(location.search);
 const qNum = (k, d) => (qs.has(k) ? parseFloat(qs.get(k)) : d);
@@ -91,6 +92,7 @@ class Env {
   }
 
   register(mat) { if (mat && mat.uniforms) this._mats.push(mat.uniforms); }
+  get materials() { return this._mats; }
 
   applyTo(u) {
     if (u.uExt) u.uExt.value.copy(this.ext);
@@ -235,6 +237,17 @@ const camera = new THREE.PerspectiveCamera(62, 1, 0.05, 900);
 
 const env = new Env();
 const post = new Post(renderer);
+
+/* The lamp's shadow. 1024^2 is the smallest map that keeps two texels across a
+ * catwalk grating bar at ten metres; see src/shadow.js for the arithmetic.
+ * ?shadows=0 switches the pass off, because a subsystem you cannot switch off
+ * cannot be cleared of causing something. */
+const lampShadow = new LampShadow(renderer, { size: qNum('shadowsize', 1024) });
+lampShadow.on = qNum('shadows', 1);
+lampShadow.biasScale = qNum('shadowbias', 1);
+
+/* Multiplier on the lamp's 0.72 m mounting arm. A diagnostic, not a setting. */
+let lampArm = qNum('lamparm', 1);
 
 /* Sound. Built here, started from the Begin descent button, because a context
  * created outside a user gesture starts suspended and stays that way.
@@ -527,6 +540,10 @@ const vessel = new Vessel(boat.origin.clone(), 0);
  * indoors and needs no switching off by hand. */
 const ext = buildExterior();
 scene.add(ext.mesh);
+
+/* Real geometry casts. Alpha-cutout flora and marine snow stay out until the
+ * depth pass can reproduce their silhouettes rather than solid billboards. */
+for (const o of [terrain, rocks, station.mesh, sub.mesh, boat.mesh, ext.mesh]) castsShadow(o);
 let propAngle = 0;
 
 /* What a swimmer can collide with. Static installations once, the boat every
@@ -1028,6 +1045,24 @@ const game = {
    * down, which is how a 1200 m rung came out at 1624 m. */
   setDepth: (m) => { setDepthBand(m); syncWater(); adaptExposure(0, true); },
   setLamp: (v) => { game.lampOn = v; syncWater(); },
+  setShadows: (v) => { lampShadow.on = +v; },
+  setShadowBias: (v) => { lampShadow.biasScale = v; },
+  setLampArm: (v) => { lampArm = v; },
+  shadowInfo: () => ({
+    on: lampShadow.on, size: lampShadow.size,
+    near: lampShadow.uniforms.uShadowNear.value,
+    far: +lampShadow.uniforms.uShadowFar.value.toFixed(2),
+    tanHalf: +lampShadow.uniforms.uShadowTanHalf.value.toFixed(4),
+    registered: env.materials.length,
+    declaring: env.materials.filter((u) => u.uShadowMap).length,
+    mapBound: env.materials.filter((u) => u.uShadowMap && u.uShadowMap.value).length,
+    onInMats: env.materials.filter((u) => u.uShadowOn).map((u) => u.uShadowOn.value),
+    rtSize: [lampShadow.rt.width, lampShadow.rt.height],
+    depthType: lampShadow.rt.depthTexture && lampShadow.rt.depthTexture.type,
+    lampPos: env.lampPos.toArray().map((x) => +x.toFixed(2)),
+    lampDir: env.lampDir.toArray().map((x) => +x.toFixed(3)),
+    vp: lampShadow.viewProj.elements.map((x) => +x.toFixed(3)),
+  }),
   setWater: (a, b, t) => env.setWater(a, b, t),
   visibility: () => env.visibility,
   setLayer: (name, on) => {
@@ -1194,7 +1229,7 @@ function frame() {
    * pasted over the middle of it. */
   env.lampPos.copy(camera.position)
     .addScaledVector(view, 1.15)
-    .addScaledVector(right, 0.72)
+    .addScaledVector(right, 0.72 * lampArm)
     .add(new THREE.Vector3(0, -0.42, 0));
   // Aimed down-forward, not along the view axis.
   env.lampDir.copy(view).addScaledVector(new THREE.Vector3(0, -1, 0), 0.17).normalize();
@@ -1288,6 +1323,11 @@ function frame() {
   });
 
   renderer.info.reset();
+
+  /* Render depth after the lamp and moving hull have reached this frame, then
+   * broadcast the live map to every receiver. */
+  lampShadow.update(scene, env);
+  for (const u of env.materials) lampShadow.applyTo(u);
   post.render(scene, camera, env);
 
   game.frames++; fpsN++; fpsT += dt;
