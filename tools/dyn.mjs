@@ -395,6 +395,34 @@ function score() {
 }
 
 /* ===================================================================== */
+function mimic() {
+  hr('ACOUSTIC MIMIC  —  the way home learns to lie');
+  const r = rig(180);
+  for (let i = 0; i < 60 * 110; i++) {
+    step(r, DT, {
+      aboard: false, boatRange: 90, breath: 10, alarm: 0,
+      scrubber: 0.8, phase: 'nominal',
+    });
+  }
+  const real = r.fired.filter((e) => e.kind === 'ping' && !e.mimic);
+  const falsePings = r.fired.filter((e) => e.kind === 'ping' && e.mimic);
+  const first = falsePings[0];
+  const beforeLearn = falsePings.filter((e) => e.t < A.MIMIC.learnTime).length;
+  const realIntervals = real.slice(1).map((e, i) => e.t - real[i].t);
+  const falseIntervals = falsePings.slice(1).map((e, i) => e.t - falsePings[i].t);
+  const mean = (xs) => xs.reduce((a, b) => a + b, 0) / Math.max(1, xs.length);
+  console.log(`  true pings ${real.length}, false replies ${falsePings.length}`);
+  console.log(`  first false reply at ${first ? first.t.toFixed(1) : 'never'} s`
+    + `  (learning gate ${A.MIMIC.learnTime} s)`);
+  console.log(`  frequencies true ${A.PINGER.f} Hz, false ${A.MIMIC.f} Hz`
+    + `  detune ${A.PINGER.f - A.MIMIC.f} Hz`);
+  console.log(`  mean cadence true ${mean(realIntervals).toFixed(2)} s, false ${mean(falseIntervals).toFixed(2)} s`);
+  const ok = beforeLearn === 0 && first && first.t >= A.MIMIC.learnTime
+    && falsePings.length >= 10 && A.MIMIC.f !== A.PINGER.f;
+  console.log(`  ${ok ? 'mimic waits, learns, and remains detectably wrong' : 'MIMIC GATE FAILED'}`);
+}
+
+/* ===================================================================== */
 function stuck() {
   hr('NO STUCK VOICES  —  everything back to its floor after the excitement');
   const r = rig(120);
@@ -420,7 +448,7 @@ function stuck() {
 }
 
 /* ===================================================================== */
-const SUITE = { constants, helm, scrubber, score, tank, descent, telegraph, ballast, silence, instrument, stuck };
+const SUITE = { constants, helm, scrubber, score, tank, descent, telegraph, ballast, silence, instrument, mimic, stuck };
 for (const [name, fn] of Object.entries(SUITE)) {
   if (only && only !== name) continue;
   fn();

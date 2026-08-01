@@ -308,6 +308,20 @@ export const PINGER = {
   level: 0.075,
 };
 
+/* Something in the canyon learns the pinger. It is deliberately close enough
+ * to be mistaken for the trunk and deliberately wrong enough that an attentive
+ * player can reject it: 37 Hz of detuning produces a slow beat against the real
+ * beacon, while its interval copies the last real interval imperfectly. The
+ * voice only wakes well outside the hull and after a quiet observation period,
+ * so the first excursion teaches the true signal before the game lies with it. */
+export const MIMIC = {
+  f: PINGER.f - 37,
+  wakeRange: 38,       // m from the trunk before it can answer
+  learnTime: 24,       // s outside before the first answer
+  level: 0.046,
+  intervalError: 0.17, // its copied cadence is always slightly too slow
+};
+
 /* Breathing on a closed loop. Two events per cycle, because the counterlung
  * makes inhalation and exhalation different sounds, and the asymmetry is most of
  * what makes it read as a person rather than as a bellows. */
@@ -468,6 +482,9 @@ export class Acoustics {
     this.thudArmed = 0;        // last contact value, for edge detection
     this.t = 0;
     this.pingClock = 0;        // s until the next ping from the trunk
+    this.mimicClock = 0;       // s until the next false reply
+    this.mimicLearn = 0;       // s spent outside, hearing the real pinger
+    this.mimicInterval = PINGER.far;
     this.breathClock = 0;      // s until the next half-cycle
     this.breathIn = true;
     this.tension = 0;          // 0..1, smoothed. What the score is about
@@ -683,6 +700,9 @@ export class Acoustics {
     if (out < 0.02) {
       this.v.alarmGain += (0 - this.v.alarmGain) * Math.min(1, dt * 3);
       this.pingClock = 0;
+      this.mimicClock = 0;
+      /* Time aboard does not erase what it learned. Once the player has taught
+       * the canyon the signal, later excursions inherit that consequence. */
       return;
     }
 
@@ -701,6 +721,32 @@ export class Acoustics {
         // beacon you cannot hear at the edge of its useful range is furniture.
         level: PINGER.level * out * (0.35 + 0.65 * (1 - k)),
       });
+    }
+
+    /* The false answer. It learns continuously but only speaks beyond the range
+     * at which the trunk should already sound reassuringly fast. This keeps the
+     * near-hatch cue trustworthy and makes uncertainty belong to the open water.
+     * The copied cadence converges slowly, so the mimic becomes more convincing
+     * across a long excursion without ever becoming mathematically identical. */
+    if (range >= MIMIC.wakeRange) {
+      this.mimicLearn += dt;
+      const learned = clamp((this.mimicLearn - MIMIC.learnTime) / 70, 0, 1);
+      this.mimicInterval += (interval - this.mimicInterval)
+        * Math.min(1, dt * (0.025 + learned * 0.055));
+      if (this.mimicLearn >= MIMIC.learnTime) {
+        this.mimicClock -= dt;
+        if (this.mimicClock <= 0) {
+          const wrong = this.mimicInterval * (1 + MIMIC.intervalError * (1 - 0.55 * learned));
+          this.mimicClock += Math.max(PINGER.near * 1.4, wrong);
+          this.events.push({
+            kind: 'ping', f: MIMIC.f,
+            mimic: true,
+            level: MIMIC.level * out * (0.72 + 0.28 * learned),
+          });
+        }
+      }
+    } else {
+      this.mimicClock = 0;
     }
 
     /* Breathing, at whatever rate the body has settled on. `life.js` owns that

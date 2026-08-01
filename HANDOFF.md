@@ -1060,9 +1060,11 @@ that frame that cannot be right.
      a creature should arrive as a *light* and resolve into a body only on approach
    - **an animal longer than 26 m can never be seen whole** — optics doing the
      monster design, not restraint
-   - the cheapest frightening idea in the file is an **acoustic mimic** of the
-     trunk pinger: two changed numbers in `audio.js`, no model, no texture, and it
-     turns the player's own way home against them
+   - the **acoustic mimic is now implemented**: after 24 seconds beyond 38 m it
+     answers at 3063 Hz, copies the trunk cadence imperfectly, and improves over a
+     long excursion without ever becoming identical. The arithmetic gate is in
+     `tools/dyn.mjs --only mimic`; the next creature step is the visible anguilliform
+     archetype, not more tuning of the false pinger.
 
    The technique is otherwise as previously noted: undulation in the vertex shader,
    Verlet chains for anything trailing, a radial pulse for bells. The scariest
