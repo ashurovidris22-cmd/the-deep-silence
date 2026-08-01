@@ -1,9 +1,7 @@
 name: Apply verified shadow wiring
 
 on:
-  push:
-    branches: [main]
-    paths: [.github/workflows/apply-shadow-wiring.yml]
+  workflow_dispatch:
 
 permissions:
   contents: write
