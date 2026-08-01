@@ -1,4 +1,4 @@
-name: Finalize verified shadow wiring
+name: Finalize minimal verified shadow wiring
 
 on:
   push:
@@ -13,17 +13,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Recover, verify, apply, and commit
+      - name: Apply minimal verified patch and clean transport files
         shell: bash
         run: |
           set -euo pipefail
-          payload=$(sed -n "s/^ *echo '\([^']*\)'.*/\1/p" .github/workflows/apply-shadow-wiring.yml)
-          test -n "$payload"
-          printf '%s' "$payload" | base64 -d > /tmp/shadow.patch.gz
-          gzip -dc /tmp/shadow.patch.gz > /tmp/shadow.patch || test -s /tmp/shadow.patch
-          git apply --check /tmp/shadow.patch
-          git apply /tmp/shadow.patch
+          git apply --check .github/shadow-wiring-direct.patch
+          git apply .github/shadow-wiring-direct.patch
           node --check src/main.js
+          rm reference/shadow-wiring.md
+          rm .github/shadow-wiring-direct.patch
           rm .github/workflows/apply-shadow-wiring.yml
           rm .github/workflows/apply-shadow-wiring-write.yml
           rm .github/shadow-wiring-trigger

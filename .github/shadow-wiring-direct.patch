@@ -1,0 +1,134 @@
+diff --git a/HANDOFF.md b/HANDOFF.md
+index 981f499..bc4720e 100644
+--- a/HANDOFF.md
++++ b/HANDOFF.md
+@@ -995,10 +995,13 @@ only frightening against silence**, so that table in `acoustics.js` is a gate.
+ Recorded because the art direction in section 1 asks for things that are simply
+ absent, and a reader could otherwise assume they are present and subtle.
+ 
+-- **There are no shadows. Not one shadow map anywhere in `src/`.** Section 1 says
+-  "few light sources, heavy bloom, visible volumetric cones, everything else in
+-  shadow" — the last clause is not implemented. Nothing occludes light; the scene
+-  holds together on extinction and fog alone.
++- **The head-mounted lamp now has one 1024² shadow projector.** The pass is
++  opt-in for real geometry, costs six draws at the canyon-floor review pose, and
++  is exposed through `?shadows=0`, `?shadowsize=`, and `?shadowbias=` for
++  measurement. Because the lamp is nearly coaxial with the eye, most cast shadows
++  hide behind their occluders; the measured exception is the catwalk grating,
++  whose slots let the eye and lamp rays separate. Alpha-cutout flora does not cast
++  yet, because the depth pass would otherwise draw solid billboard rectangles.
+ - **No temporal filter.** `post.js` says so in its own comment, and pays for it:
+   it uses white noise rather than interleaved gradient noise specifically because
+   there is nothing to average the structure away. Measured, the grain is +-80 on a
+@@ -1041,10 +1044,12 @@ that frame that cannot be right.
+    anyway, and the wrist unit's bearing arrow is what actually prevents getting
+    lost. The arrow is verified working: bearing 042°, range 45 m, checked against
+    the geometry by hand.
+-4. **Shadows.** One shadow-casting projector on the lamp. Largest visual return
+-   available, affordable four times over — see the end of section 7 for the
+-   measurements. Everything else on that list (a temporal filter, more marine snow,
+-   contact shadows) is cheaper and worth less.
++4. **Judge the new lamp shadow on hardware.** The projector is wired and the
++   catwalk occlusion is measured, while the arithmetic and sound gates remain
++   identical. Confirm that the moving grating shadow reads naturally at full
++   quality. If stronger shadow composition is wanted, change the rig or scene
++   geometry rather than tuning bias: the nearly coaxial lamp correctly hides most
++   shadows behind their casters.
+ 5. **Creatures — read `DESIGN-CREATURES.md` before starting.** That file is a
+    design conversation rather than a decision, but its arithmetic is checked and it
+    changes the order of the work. Four things to know first:
+diff --git a/src/main.js b/src/main.js
+index ab01d50..d1bd806 100644
+--- a/src/main.js
++++ b/src/main.js
+@@ -14,6 +14,7 @@ import { buildExterior } from './exterior.js';
+ import { Audio } from './audio.js';
+ import { Life } from './life.js';
+ import { FS_VERT, WATER } from './glsl.js';
++import { LampShadow, castsShadow } from './shadow.js';
+ 
+ const qs = new URLSearchParams(location.search);
+ const qNum = (k, d) => (qs.has(k) ? parseFloat(qs.get(k)) : d);
+@@ -91,6 +92,7 @@ class Env {
+   }
+ 
+   register(mat) { if (mat && mat.uniforms) this._mats.push(mat.uniforms); }
++  get materials() { return this._mats; }
+ 
+   applyTo(u) {
+     if (u.uExt) u.uExt.value.copy(this.ext);
+@@ -236,6 +238,17 @@ const camera = new THREE.PerspectiveCamera(62, 1, 0.05, 900);
+ const env = new Env();
+ const post = new Post(renderer);
+ 
++/* The lamp's shadow. 1024^2 is the smallest map that keeps two texels across a
++ * catwalk grating bar at ten metres; see src/shadow.js for the arithmetic.
++ * ?shadows=0 switches the pass off, because a subsystem you cannot switch off
++ * cannot be cleared of causing something. */
++const lampShadow = new LampShadow(renderer, { size: qNum('shadowsize', 1024) });
++lampShadow.on = qNum('shadows', 1);
++lampShadow.biasScale = qNum('shadowbias', 1);
++
++/* Multiplier on the lamp's 0.72 m mounting arm. A diagnostic, not a setting. */
++let lampArm = qNum('lamparm', 1);
++
+ /* Sound. Built here, started from the Begin descent button, because a context
+  * created outside a user gesture starts suspended and stays that way.
+  *
+@@ -527,6 +540,10 @@ const vessel = new Vessel(boat.origin.clone(), 0);
+  * indoors and needs no switching off by hand. */
+ const ext = buildExterior();
+ scene.add(ext.mesh);
++
++/* Real geometry casts. Alpha-cutout flora and marine snow stay out until the
++ * depth pass can reproduce their silhouettes rather than solid billboards. */
++for (const o of [terrain, rocks, station.mesh, sub.mesh, boat.mesh, ext.mesh]) castsShadow(o);
+ let propAngle = 0;
+ 
+ /* What a swimmer can collide with. Static installations once, the boat every
+@@ -1028,6 +1045,24 @@ const game = {
+    * down, which is how a 1200 m rung came out at 1624 m. */
+   setDepth: (m) => { setDepthBand(m); syncWater(); adaptExposure(0, true); },
+   setLamp: (v) => { game.lampOn = v; syncWater(); },
++  setShadows: (v) => { lampShadow.on = +v; },
++  setShadowBias: (v) => { lampShadow.biasScale = v; },
++  setLampArm: (v) => { lampArm = v; },
++  shadowInfo: () => ({
++    on: lampShadow.on, size: lampShadow.size,
++    near: lampShadow.uniforms.uShadowNear.value,
++    far: +lampShadow.uniforms.uShadowFar.value.toFixed(2),
++    tanHalf: +lampShadow.uniforms.uShadowTanHalf.value.toFixed(4),
++    registered: env.materials.length,
++    declaring: env.materials.filter((u) => u.uShadowMap).length,
++    mapBound: env.materials.filter((u) => u.uShadowMap && u.uShadowMap.value).length,
++    onInMats: env.materials.filter((u) => u.uShadowOn).map((u) => u.uShadowOn.value),
++    rtSize: [lampShadow.rt.width, lampShadow.rt.height],
++    depthType: lampShadow.rt.depthTexture && lampShadow.rt.depthTexture.type,
++    lampPos: env.lampPos.toArray().map((x) => +x.toFixed(2)),
++    lampDir: env.lampDir.toArray().map((x) => +x.toFixed(3)),
++    vp: lampShadow.viewProj.elements.map((x) => +x.toFixed(3)),
++  }),
+   setWater: (a, b, t) => env.setWater(a, b, t),
+   visibility: () => env.visibility,
+   setLayer: (name, on) => {
+@@ -1194,7 +1229,7 @@ function frame() {
+    * pasted over the middle of it. */
+   env.lampPos.copy(camera.position)
+     .addScaledVector(view, 1.15)
+-    .addScaledVector(right, 0.72)
++    .addScaledVector(right, 0.72 * lampArm)
+     .add(new THREE.Vector3(0, -0.42, 0));
+   // Aimed down-forward, not along the view axis.
+   env.lampDir.copy(view).addScaledVector(new THREE.Vector3(0, -1, 0), 0.17).normalize();
+@@ -1288,6 +1323,11 @@ function frame() {
+   });
+ 
+   renderer.info.reset();
++
++  /* Render depth after the lamp and moving hull have reached this frame, then
++   * broadcast the live map to every receiver. */
++  lampShadow.update(scene, env);
++  for (const u of env.materials) lampShadow.applyTo(u);
+   post.render(scene, camera, env);
+ 
+   game.frames++; fpsN++; fpsT += dt;
