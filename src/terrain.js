@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { NOISE, WATER } from './glsl.js';
+import { NOISE, WATER, LAMP } from './glsl.js';
 
 /* The seabed, and the shape of the whole game.
  *
@@ -166,9 +166,26 @@ export function buildTerrain(size = 1200, seg = 480) {
       uLampPos: { value: new THREE.Vector3() },
       uLampDir: { value: new THREE.Vector3(0, 0, -1) },
       uLampCol: { value: new THREE.Vector3(1, 0.97, 0.92) },
-      uLampInt: { value: 90 },
-      uLampCos: { value: Math.cos(0.42) },
-      uLampSoft: { value: 0.30 },
+      /* Live values, not historical ones. These read 90, cos(0.42) and 0.30 -
+       * a tenth of the intensity and a 24 degree cone against the real 84.8 -
+       * and it never showed because Env.applyTo overwrites them every tick. A
+       * default that is only ever wrong when something else has already failed
+       * is a trap laid for the next failure. */
+      uLampInt: { value: 900 },
+      uLampCos: { value: Math.cos(0.74) },
+      uLampSoft: { value: 0.34 },
+      /* Overwritten every frame by LampShadow.applyTo. The defaults exist only
+       * so the material compiles standalone; uShadowOn is 0 here so that a
+       * material which never gets the pass attached renders unshadowed rather
+       * than fully black - failing to the state the game had before shadows. */
+      uShadowMap: { value: null },
+      uLampVP: { value: new THREE.Matrix4() },
+      uShadowSize: { value: 1024 },
+      uShadowTanHalf: { value: Math.tan(0.74) },
+      uShadowNear: { value: 0.25 },
+      uShadowFar: { value: 30 },
+      uShadowOn: { value: 0 },
+      uShadowBiasScale: { value: 1 },
       uTime: { value: 0 },
     },
     vertexShader: /* glsl */`
@@ -183,7 +200,7 @@ export function buildTerrain(size = 1200, seg = 480) {
       ${NOISE}
       ${WATER}
       varying vec3 vW; varying vec3 vN;
-      uniform vec3 uLampPos, uLampDir, uLampCol; uniform float uLampInt, uLampCos, uLampSoft;
+      ${LAMP}
       uniform float uTime;
 
       void main(){
@@ -275,7 +292,7 @@ export function buildTerrain(size = 1200, seg = 480) {
         vec3  toL = uLampPos - vW;
         float dL  = length(toL);
         vec3  L   = toL / max(dL,1e-4);
-        float cone = smoothstep(uLampCos, uLampCos + uLampSoft, dot(-L, normalize(uLampDir)));
+        float cone = lampCone(L);
         /* Finite source size, not a mathematical point.
          *
          * A real floodlight has a lens some tens of centimetres across, so the
@@ -288,7 +305,7 @@ export function buildTerrain(size = 1200, seg = 480) {
         float atten = uLampInt / (6.0 + dL*dL*1.0);
         // Wrapped diffuse — silt is dusty and has no hard terminator.
         float ndl = pow(clamp((dot(n,L)+0.28)/1.28, 0.0, 1.0), 1.35);
-        vec3 lit = alb * uLampCol * ndl * atten * cone * lampTransmit(dL);
+        vec3 lit = alb * uLampCol * ndl * atten * cone * lampTransmit(dL) * lampShadow(vW, n);
 
         vec3 daylight = ambientAt(vW.y);
         lit += alb * daylight * (0.30 + 0.70*clamp(n.y*0.5+0.5,0.0,1.0));
