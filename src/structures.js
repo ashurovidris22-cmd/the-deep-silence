@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { NOISE, WATER } from './glsl.js';
+import { NOISE, WATER, LAMP } from './glsl.js';
 import { seabedHeight } from './terrain.js';
 import { rng, SEEDS } from './rng.js';
 
@@ -321,9 +321,28 @@ export function structureMaterial() {
       uLampPos: { value: new THREE.Vector3() },
       uLampDir: { value: new THREE.Vector3(0, 0, -1) },
       uLampCol: { value: new THREE.Vector3(1, 0.97, 0.92) },
-      uLampInt: { value: 90 },
-      uLampCos: { value: Math.cos(0.42) },
-      uLampSoft: { value: 0.30 },
+      /* These three are the live values, not the historical ones.
+       *
+       * They read 90, cos(0.42) and 0.30 until this migration - a tenth of the
+       * intensity and a 24 degree cone against the real 84.8 - and it never
+       * showed because Env.applyTo overwrites them every tick. A default that
+       * is only ever wrong when something else fails is a trap laid for the
+       * next failure, not a default. */
+      uLampInt: { value: 900 },
+      uLampCos: { value: Math.cos(0.74) },
+      uLampSoft: { value: 0.34 },
+      /* The shadow block, with the map absent and the test off, so the material
+       * compiles and renders standalone; main.js binds the map and raises
+       * uShadowOn once the pass exists. Same defaults as terrain.js, and for
+       * the same reason. */
+      uShadowMap: { value: null },
+      uLampVP: { value: new THREE.Matrix4() },
+      uShadowSize: { value: 1024 },
+      uShadowTanHalf: { value: Math.tan(0.74) },
+      uShadowNear: { value: 0.25 },
+      uShadowFar: { value: 30 },
+      uShadowOn: { value: 0 },
+      uShadowBiasScale: { value: 1 },
       uTime: { value: 0 },
     },
     vertexShader: /* glsl */`
@@ -340,10 +359,10 @@ export function structureMaterial() {
       precision highp float;
       ${NOISE}
       ${WATER}
+      ${LAMP}
       varying vec3 vW; varying vec3 vN; varying float vMat; varying float vWear;
       varying vec2 vUV;
-      uniform vec3 uLampPos, uLampDir, uLampCol;
-      uniform float uLampInt, uLampCos, uLampSoft, uTime;
+      uniform float uTime;
 
       void main(){
         float dist = length(cameraPosition - vW);
@@ -447,10 +466,15 @@ export function structureMaterial() {
         vec3  toL = uLampPos - vW;
         float dL  = length(toL);
         vec3  L   = toL / max(dL,1e-4);
-        float cone = smoothstep(uLampCos, uLampCos + uLampSoft, dot(-L, normalize(uLampDir)));
+        float cone = lampCone(L);
         float atten = uLampInt / (6.0 + dL*dL*1.0);
         float ndl = max(dot(n, L), 0.0);
-        vec3 lamp = uLampCol * atten * cone * lampTransmit(dL);
+        /* The occlusion term multiplies the lamp itself, so it takes the wet
+         * specular below with it. A highlight surviving inside a shadow is the
+         * classic tell of a shadow bolted onto diffuse only, and on wet metal -
+         * which is nearly all specular at grazing angles - it would be the most
+         * visible thing in the frame. */
+        vec3 lamp = uLampCol * atten * cone * lampTransmit(dL) * lampShadow(vW, n);
         vec3 lit = alb * lamp * ndl;
 
         /* Wet specular. Submerged metal is always wet, and the sheen is the
