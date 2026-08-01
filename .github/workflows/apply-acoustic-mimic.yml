@@ -1,0 +1,33 @@
+name: Apply verified acoustic mimic
+
+on:
+  push:
+    paths:
+      - '.github/acoustic-mimic-trigger'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply, test, and clean
+        shell: bash
+        run: |
+          set -euo pipefail
+          git apply --check .github/acoustic-mimic.patch
+          git apply .github/acoustic-mimic.patch
+          node --check src/acoustics.js
+          node --check src/audio.js
+          node --check src/main.js
+          node tools/dyn.mjs --only mimic | grep -q 'mimic waits, learns, and remains detectably wrong'
+          rm .github/acoustic-mimic.patch
+          rm .github/acoustic-mimic-trigger
+          rm .github/workflows/apply-acoustic-mimic.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Add an acoustic mimic to the excursion loop'
+          git push
