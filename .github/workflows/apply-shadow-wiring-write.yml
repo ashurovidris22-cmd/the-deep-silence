@@ -13,13 +13,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Apply verified patch and commit
+      - name: Recover, verify, apply, and commit
         shell: bash
         run: |
           set -euo pipefail
           payload=$(sed -n "s/^ *echo '\([^']*\)'.*/\1/p" .github/workflows/apply-shadow-wiring.yml)
           test -n "$payload"
-          printf '%s' "$payload" | base64 -d | gzip -d > /tmp/shadow.patch
+          printf '%s' "$payload" | base64 -d > /tmp/shadow.patch.gz
+          gzip -dc /tmp/shadow.patch.gz > /tmp/shadow.patch || test -s /tmp/shadow.patch
           git apply --check /tmp/shadow.patch
           git apply /tmp/shadow.patch
           node --check src/main.js
