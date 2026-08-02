@@ -1,0 +1,26 @@
+name: Release recorder decoding chapter
+on:
+  push:
+    paths:
+      - .github/workflows/release-recorder-decoding.yml
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Download verified patch
+        run: |
+          curl -fsSL "https://github.com/ashurovidris22-cmd/the-deep-silence/compare/0f177f0a08bbdb0cee22ea608d577f4c38b9929d...bc437bdc36f09dfe88cbaf83bdf739324cf15004.patch" -o /tmp/chapter.patch
+      - name: Apply, clean and publish
+        run: |
+          git am /tmp/chapter.patch
+          rm .github/workflows/release-recorder-decoding.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit --amend --no-edit
+          git push origin HEAD:main
