@@ -11,9 +11,10 @@ ever increases. Not Barotrauma's art style.
 the seabed, the flora, the post chain, a furnished eighteen-metre pressure hull,
 the vessel dynamics, the sound layer and a timed excursion outside the hull all
 exist. The canyon now has its first inhabitant: the acoustic mimic that learns the
-way-home signal eventually resolves into a lamp-shy anguilliform swimmer. Nothing
-yet asks the player to go *down*, which remains the largest gap and is a design gap
-rather than a rendering one.
+way-home signal eventually resolves into a lamp-shy anguilliform swimmer. The first
+complete objective now asks the player to descend to the wreck, free a deep recorder
+under exposure, carry it home on the finite scrubber, and live with what the recovery
+wakes.
 
 ## Why the water is not art-directed
 
@@ -54,6 +55,7 @@ src/life.js         the suit's CO2 scrubber — why you come back
 src/acoustics.js    underwater acoustics, and the state-to-sound map. Pure maths
 src/audio.js        the synthesiser: owns the AudioContext, decides nothing
 src/creatures.js    the acoustic mimic's body and Strouhal-derived swimming
+src/recorder.js     the first recovery objective: extraction, carriage and return
 src/glsl.js         shared GLSL: noise, the water model, phase function
 src/terrain.js      seabed heightfield (CPU, for exact normals) + the light ramp
 src/props.js        kelp and boulders — the silhouette layer
@@ -83,6 +85,7 @@ Take the seat at the bow with **E**, and then:
 | `E` | stand up. She keeps whatever way you left on |
 | `M` | mute |
 | `V` | at the hatch, go outside. Within five metres of the trunk, come back in |
+| `E` | hold beside the deep recorder to release it from its clamps |
 
 Three things make her a vessel rather than a flying box. Vertical is ballast,
 not thrust, so every depth command is committed long before it answers. A rudder

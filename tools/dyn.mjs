@@ -35,6 +35,7 @@ const { headingDir, screenRight } = await import('../src/controls.js');
 const A = await import('../src/acoustics.js');
 const LIFE = await import('../src/life.js');
 const CREATURE = await import('../src/creatures.js');
+const RECORDER = await import('../src/recorder.js');
 const { Acoustics } = A;
 
 const DT = 1 / 60;                    // fixed. The whole reason this file exists.
@@ -450,6 +451,37 @@ function creature() {
 }
 
 /* ===================================================================== */
+function recorder() {
+  hr('DEEP RECORDER  —  recovery is a commitment, not a proximity pickup');
+  const target = new THREE.Vector3(4, -392, 7);
+  const s = new RECORDER.RecorderState(target);
+  const swimmer = target.clone().add(new THREE.Vector3(1.1, 0, 0));
+  const began = s.begin(swimmer);
+  for (let i = 0; i < 60 * (RECORDER.RECOVERY_TIME - 0.5); i++) {
+    s.update(DT, { swimmer, holding: true, outside: true });
+  }
+  const early = s.carrying;
+  for (let i = 0; i < 60; i++) s.update(DT, { swimmer, holding: true, outside: true });
+  const carried = s.carrying && s.recovered;
+  const deniedAtSea = !s.deliver(false);
+  const delivered = s.deliver(true) && s.complete;
+
+  const dropped = new RECORDER.RecorderState(target);
+  dropped.begin(swimmer);
+  for (let i = 0; i < 60 * 1.2; i++) dropped.update(DT, { swimmer, holding: true, outside: true });
+  swimmer.x += 6;
+  dropped.update(DT, { swimmer, holding: true, outside: true });
+  const interrupted = dropped.phase === 'sealed' && dropped.progress < 1;
+
+  const ok = began && !early && carried && deniedAtSea && delivered && interrupted;
+  console.log(`  began in range ${began}  premature pickup ${early}`);
+  console.log(`  carried after ${RECORDER.RECOVERY_TIME.toFixed(1)} s ${carried}`);
+  console.log(`  delivery denied outside ${deniedAtSea}  accepted aboard ${delivered}`);
+  console.log(`  leaving the clamps interrupts recovery ${interrupted}`);
+  console.log(`  ${ok ? 'recovery, interruption and return gates hold' : 'RECORDER GATE FAILED'}`);
+}
+
+/* ===================================================================== */
 function stuck() {
   hr('NO STUCK VOICES  —  everything back to its floor after the excitement');
   const r = rig(120);
@@ -475,7 +507,7 @@ function stuck() {
 }
 
 /* ===================================================================== */
-const SUITE = { constants, helm, scrubber, score, tank, descent, telegraph, ballast, silence, instrument, mimic, creature, stuck };
+const SUITE = { constants, helm, scrubber, score, tank, descent, telegraph, ballast, silence, instrument, mimic, creature, recorder, stuck };
 for (const [name, fn] of Object.entries(SUITE)) {
   if (only && only !== name) continue;
   fn();

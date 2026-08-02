@@ -96,6 +96,22 @@
   }
   #prompt[hidden] { display:none; }
 
+  /* One objective, kept separate from instruments. It tells the player why they
+     are moving without drawing a waypoint through the water. */
+  #objective {
+    position:fixed; right:24px; top:22px; z-index:5; width:min(330px,42vw);
+    pointer-events:none; padding:11px 14px; border-right:2px solid rgba(159,211,221,.28);
+    background:linear-gradient(90deg,transparent,rgba(4,12,16,.38)); text-align:right;
+    font:400 10px/1.55 ui-monospace,monospace; letter-spacing:.16em;
+    color:rgba(150,205,215,.58); text-transform:uppercase; text-shadow:0 1px 10px #000;
+  }
+  #objective b { display:block; font-weight:400; color:rgba(205,240,248,.9); letter-spacing:.2em; }
+  #objective.urgent { border-color:rgba(255,178,100,.62); }
+  #objective.urgent b { color:rgba(255,204,145,.96); }
+  #objective.complete { border-color:rgba(110,225,180,.58); }
+  #objective.complete b { color:rgba(150,240,205,.92); }
+  #objective[hidden] { display:none; }
+
   /* Outside the hull. One block, and it only exists while you are out there —
      the boat has instruments, a swimmer has a wrist unit. */
   #exo {
@@ -154,6 +170,10 @@
      no prompt, standing next to a pilot's seat looks exactly like standing next
      to a wall, and the player has no way to learn that E does anything. -->
 <div id="prompt" hidden><kbd>E</kbd><span id="promptText"></span></div>
+<div id="objective" hidden>
+  <b id="objectiveTitle">Recover deep recorder</b>
+  <span id="objectiveDetail">Descend to the wreck and leave through the hatch</span>
+</div>
 
 <!-- The wrist unit. Only while outside the hull: a bearing to the trunk, the
      range to it, and how much of the canister is left. Visibility is 21 m and

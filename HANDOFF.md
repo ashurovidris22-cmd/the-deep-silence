@@ -1070,15 +1070,16 @@ that frame that cannot be right.
    Verlet chains for anything trailing, a radial pulse for bells. The scariest
    creature is the slowest, which is also the cheapest to animate — and **they now
    have a soundscape to arrive into**, so sound can come before sight.
-6. **A reason to go *down*.** Half of this closed: leaving the hull now has a
-   clock on it and a way home, so an excursion is a decision. But that is a reason
-   to come *back*, and the descent itself still asks for nothing — she can be
-   driven, the zones exist, the pressure model is real and now audible, and no
-   part of the game wants the player at 400 m. Still a design gap rather than a
-   rendering one, and still the largest thing between "impressive" and "a game".
-   The excursion loop is the obvious hook to hang it on: something down there that
-   has to be reached on foot, far enough from the boat that fifteen minutes of
-   sorbent is a real budget.
+6. **CLOSED — a reason to go *down*.** The deep recorder beyond the wreck is now
+   the first complete objective. It takes 4.2 exposed seconds to release, must be
+   physically carried back through the hatch, adds metabolic work to the finite
+   scrubber budget, and is dropped rather than banked if the swimmer blacks out.
+   Extraction vibration raises the existing mimic's presence and speed without
+   turning it into a pursuing enemy. The UI gives recorder range but no target
+   bearing: the wreck and weak red pulse still have to be searched for, while the
+   wrist arrow remains reserved for the way home. `node tools/dyn.mjs --only
+   recorder` verifies the proximity, hold, interruption and aboard-only return
+   gates.
 7. **Interior polish, the known weak spots.** The mess table and the galley
    counter still read as plain boxes at two metres and want the edge treatment
    the lockers got. The cabin is lit toward the top of its value range and could

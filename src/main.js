@@ -16,6 +16,7 @@ import { Life } from './life.js';
 import { FS_VERT, WATER } from './glsl.js';
 import { LampShadow, castsShadow } from './shadow.js';
 import { AcousticMimic } from './creatures.js';
+import { DeepRecorder, CARRY_EFFORT, INTERACT_RANGE } from './recorder.js';
 
 const qs = new URLSearchParams(location.search);
 const qNum = (k, d) => (qs.has(k) ? parseFloat(qs.get(k)) : d);
@@ -374,6 +375,12 @@ pilot.toggleMode = () => {
 };
 pilot.interact = () => {
   if (game.mode === 'helm') { enterWalk(); pilot.enabled = true; return; }
+  if (game.mode === 'swim') {
+    /* Recovery is completed by holding E in the frame loop. Beginning it here
+     * makes the first press responsive while keeping the same geometric gate. */
+    recorder?.begin(pilot.pos);
+    return;
+  }
   if (game.mode !== 'walk') return;
   // Only from the seat: an interaction that works from anywhere is a menu.
   const p = pilot.pos;   // hull-local while walking
@@ -548,9 +555,18 @@ scene.add(ext.mesh);
 const mimic = new AcousticMimic(env);
 scene.add(mimic.root);
 
+/* The target sits beyond the wreck, far enough from the launch point that the
+ * swimmer cannot treat it as a hatch tutorial. Its height comes from the same
+ * heightfield that draws and collides with the floor. */
+const RECORDER_X = -48, RECORDER_Z = 59;
+const recorder = new DeepRecorder(env, new THREE.Vector3(
+  RECORDER_X, seabedHeight(RECORDER_X, RECORDER_Z) + 0.72, RECORDER_Z,
+));
+scene.add(recorder.root);
+
 /* Real geometry casts. Alpha-cutout flora and marine snow stay out until the
  * depth pass can reproduce their silhouettes rather than solid billboards. */
-for (const o of [terrain, rocks, station.mesh, sub.mesh, boat.mesh, ext.mesh]) castsShadow(o);
+for (const o of [terrain, rocks, station.mesh, sub.mesh, boat.mesh, ext.mesh, recorder.root]) castsShadow(o);
 let propAngle = 0;
 
 /* What a swimmer can collide with. Static installations once, the boat every
@@ -1011,6 +1027,7 @@ const game = {
    * overlay, so the vignette a frame shows is the one a player would get. */
   life: () => life,
   creature: () => mimic,
+  recorder: () => recorder,
   pose: (n) => { applyPose(n); },
   /* Put the camera at a named station inside the boat.
    *
@@ -1299,9 +1316,19 @@ function frame() {
    * geometric test serves both the renderer and the ear. `eyeL.z` is the
    * listener's station along the hull, which is what makes the pump loud in the
    * machinery space and distant at the wheel. */
+  /* The recorder must be pulled free under exposure, then physically brought
+   * home. Holding it raises work rate rather than imposing an arbitrary movement
+   * penalty: the scrubber is already the excursion's honest resource. */
+  if (game.mode === 'swim' && pilot.keys.has('KeyE')) recorder.begin(pilot.pos);
+  recorder.update(dt, {
+    swimmer: pilot.pos, outside: !aboard,
+    holding: game.mode === 'swim' && pilot.keys.has('KeyE'),
+  });
+  if (aboard) recorder.deliver(true);
+
   /* Life support, on the same gate. Aboard the canister gets swapped; outside it
    * fills with what the swimmer breathes out, faster the harder they swim. */
-  life.update(dt, { aboard, speed: pilot.speed });
+  life.update(dt, { aboard, speed: pilot.speed, effort: recorder.carrying ? CARRY_EFFORT : 0 });
   for (const e of life.events) {
     /* Coming round. `life.js` deliberately does not know where "aboard" is, so
      * it raises the event and the world does the placing — the same division as
@@ -1310,6 +1337,9 @@ function frame() {
      * Waking on a bunk rather than at the hatch, because being carried in is a
      * story and standing up in the airlock is a respawn. */
     if (e.kind === 'wake') {
+      /* Rescue does not rescue the evidence. Losing consciousness drops it at
+       * the last real position, so failure cannot silently complete the goal. */
+      recorder.drop(pilot.pos);
       const b = INSIDE.bunks;
       enterWalk();
       pilot.enabled = true;
@@ -1337,6 +1367,7 @@ function frame() {
     swimmer: camera.position, boatRange, outside: !aboard,
     lampPos: env.lampPos, lampDir: env.lampDir,
     learn: audio.acoustics.mimicLearn,
+    disturbance: recorder.disturbance,
   });
 
   renderer.info.reset();
@@ -1368,7 +1399,10 @@ function frame() {
      * different rules — the prompt measured nine metres to the hull's centre, the
      * action measured nothing at all — which is how a player learns a control
      * works differently from how it was advertised. */
-    if (hatchRange() < 5.0) pmsg = 'V — back inside';
+    const rr = recorder.rangeTo(pilot.pos);
+    if (recorder.phase === 'sealed' && rr <= INTERACT_RANGE) pmsg = 'Hold E — free the recorder';
+    else if (recorder.phase === 'extracting') pmsg = `Extracting — ${Math.round(recorder.progress * 100)}%`;
+    else if (hatchRange() < 5.0) pmsg = 'V — back inside';
   }
   if (pmsg && !game.uiOff) { ptext.textContent = pmsg; prompt.hidden = false; } else prompt.hidden = true;
 
@@ -1382,7 +1416,7 @@ function frame() {
         ? [['W A S D', 'walk'], ['Mouse', 'look'], ['Space', 'step up'],
            ['E', 'use'], ['V', 'exit at hatch'], ['L', 'lamp']]
         : [['W A S D', 'thrust'], ['Space / C', 'rise / sink'], ['Shift', 'transit'],
-           ['V', 'back inside'], ['L', 'lamp'], ['H', 'hide this']];
+           ['E', 'recover target'], ['V', 'back inside'], ['L', 'lamp'], ['H', 'hide this']];
     // One line rather than three: mute belongs in every mode.
     rows.push(['M', audio.muted ? 'sound — muted' : 'mute sound']);
     const html = rows.map(([k, v]) => `<div><b>${k}</b>${v}</div>`).join('');
@@ -1435,6 +1469,22 @@ function frame() {
       : life.phase === 'warn' ? 'warn' : '';
     if (sc.className !== cls) sc.className = cls;
   }
+  /* Mission state stays terse. Range is useful instrumentation; a second bearing
+   * arrow would turn the dark into a waypoint chase and erase the search. */
+  const objective = document.getElementById('objective');
+  objective.hidden = game.uiOff;
+  if (!objective.hidden) {
+    let title = 'Recover deep recorder';
+    let detail = aboard ? 'Descend to the wreck and leave through the hatch'
+      : `Weak transponder · ${recorder.rangeTo(pilot.pos).toFixed(0)} m`;
+    if (recorder.phase === 'extracting') detail = `Releasing clamps · ${Math.round(recorder.progress * 100)}%`;
+    if (recorder.carrying) { title = 'Return recorder to the vessel'; detail = `Trunk · ${hatchRange().toFixed(0)} m`; }
+    if (recorder.complete) { title = 'Recorder secured'; detail = 'Playback contains a second return signal'; }
+    document.getElementById('objectiveTitle').textContent = title;
+    document.getElementById('objectiveDetail').textContent = detail;
+    objective.className = recorder.complete ? 'complete' : recorder.carrying ? 'urgent' : '';
+  }
+
   if (!game.uiOff) {
     document.getElementById('veil').style.opacity = life.veil.toFixed(3);
     document.getElementById('fade').style.opacity = life.fade.toFixed(3);
@@ -1477,6 +1527,8 @@ function frame() {
        * no idea why" is answerable from a photograph once the rate is printed:
        * the canister is spent by how hard you swam, not by the clock. */
       life.report() + (aboard ? '   aboard' : `   out, trunk ${hatchRange().toFixed(0)} m`),
+      `recorder ${recorder.phase}  ${Math.round(recorder.progress * 100)}%`
+        + `  range ${recorder.rangeTo(pilot.pos).toFixed(1)} m`,
     ].join('\n');
   }
 }

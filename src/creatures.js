@@ -105,10 +105,11 @@ function creatureMaterial() {
         vec3 L=uLampPos-vW; float d=length(L); vec3 ld=L/max(d,0.001);
         float cone=lampCone(-ld);
         float diffuse=clamp((dot(normalize(vN),ld)+0.20)/1.20,0.0,1.0);
-        float lit=cone*diffuse*uLampInt/(6.0+d*d)*lampTransmit(d)*lampShadow(vW,normalize(vN));
+        float light=cone*diffuse*uLampInt/(6.0+d*d)*lampShadow(vW,normalize(vN));
+        vec3 lit=uLampCol*light*lampTransmit(d);
         vec3 skin=mix(vec3(0.007,0.010,0.012),vec3(0.020,0.032,0.029),smoothstep(0.25,0.95,vBody));
         skin*=0.72+0.28*sin(vBody*48.0+sin(vBody*13.0));
-        vec3 color=skin*(waterAmbient(vW.y)+uLampCol*lit);
+        vec3 color=skin*(ambientAt(vW.y)+lit);
         /* Photophores arrive before the reflective body. A broken, asymmetric line
          * cannot be confused with the trunk's two-pulse strobe. */
         float beads=pow(max(0.0,sin(vBody*88.0-0.7)),22.0);
@@ -132,8 +133,12 @@ export class AcousticMimic {
     this._wanted = new THREE.Vector3(); this._away = new THREE.Vector3();
   }
 
-  update(dt, { swimmer, boatRange, outside, lampPos, lampDir, learn }) {
-    const presence = outside ? mimicPresence(learn, boatRange) : 0;
+  update(dt, { swimmer, boatRange, outside, lampPos, lampDir, learn, disturbance = 0 }) {
+    /* Pulling the recorder free broadcasts vibration through its frame. It does
+     * not spawn a pursuer; it lets the existing observer close sooner and swim
+     * harder, preserving the creature's rule while making recovery consequential. */
+    const basePresence = outside ? mimicPresence(learn, boatRange) : 0;
+    const presence = Math.max(basePresence, outside && boatRange > 18 ? disturbance * 0.72 : 0);
     this.root.visible = presence > 0.015;
     this.material.uniforms.uReveal.value += (presence - this.material.uniforms.uReveal.value)
       * (1 - Math.exp(-dt / 1.8));
@@ -147,9 +152,9 @@ export class AcousticMimic {
     /* It closes only to the edge of useful visibility. The better it has learned,
      * the more of the body may resolve, but the whole 13.5 m animal is never offered
      * broadside in clear water. */
-    const desiredRadius = 31 - presence * 13;
+    const desiredRadius = 31 - presence * 13 - disturbance * 2.5;
     this.radius += (desiredRadius - this.radius) * (1 - Math.exp(-dt / 8));
-    this.speed = 0.72 + presence * 0.72;
+    this.speed = 0.72 + presence * 0.72 + disturbance * 0.28;
     this.angle += dt * this.speed / Math.max(8, this.radius);
     this.target.set(swimmer.x + Math.cos(this.angle) * this.radius,
       swimmer.y + Math.sin(this.angle * 0.47) * 2.2,

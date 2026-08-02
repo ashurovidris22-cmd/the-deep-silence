@@ -135,7 +135,9 @@ export class Life {
     const o2 = v <= V_SWIM
       ? O2_REST + (O2_SWIM - O2_REST) * (v / V_SWIM)
       : O2_SWIM + (O2_HARD - O2_SWIM) * clamp((v - V_SWIM) / (V_HARD - V_SWIM), 0, 1);
-    this.rate = o2 * RQ;
+    /* Carrying recovered hardware is work even at zero speed. Model it as extra
+     * metabolic oxygen demand so stopping still helps, but never becomes free. */
+    this.rate = (o2 + Math.max(0, s.effort || 0)) * RQ;
 
     if (this.phase === 'blackout') return this._blackout(dt);
     if (this.phase === 'waking') return this._waking(dt);
