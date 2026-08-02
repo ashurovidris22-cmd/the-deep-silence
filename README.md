@@ -10,9 +10,10 @@ ever increases. Not Barotrauma's art style.
 **Status: she can be driven, walked around inside, heard, and left.** The optics,
 the seabed, the flora, the post chain, a furnished eighteen-metre pressure hull,
 the vessel dynamics, the sound layer and a timed excursion outside the hull all
-exist. The inhabitants do not yet — and nothing yet asks the player to go *down*,
-which is the largest remaining gap and it is a design gap rather than a rendering
-one.
+exist. The canyon now has its first inhabitant: the acoustic mimic that learns the
+way-home signal eventually resolves into a lamp-shy anguilliform swimmer. Nothing
+yet asks the player to go *down*, which remains the largest gap and is a design gap
+rather than a rendering one.
 
 ## Why the water is not art-directed
 
@@ -52,6 +53,7 @@ src/jerlov.js       seawater optics constants, depth zones, pressure
 src/life.js         the suit's CO2 scrubber — why you come back
 src/acoustics.js    underwater acoustics, and the state-to-sound map. Pure maths
 src/audio.js        the synthesiser: owns the AudioContext, decides nothing
+src/creatures.js    the acoustic mimic's body and Strouhal-derived swimming
 src/glsl.js         shared GLSL: noise, the water model, phase function
 src/terrain.js      seabed heightfield (CPU, for exact normals) + the light ramp
 src/props.js        kelp and boulders — the silhouette layer
@@ -341,11 +343,12 @@ Kept because each one cost real time and each will recur.
 
 ## Where the design thinking lives
 
-`HANDOFF.md` is what has been decided and measured. `DESIGN-CREATURES.md` is a
-design conversation that has not been built yet — how to make the inhabitants
-frightening and alive, why the Strouhal number is the animation constant, and why
-an animal longer than 26 m can never be seen whole in this water. Kept separate on
-purpose: one file is fact, the other is argument.
+`HANDOFF.md` is what has been decided and measured. `DESIGN-CREATURES.md` records
+the creature design argument; its first archetype and acoustic mimicry are now in
+the game, while the siphonophore, swarm and whale fall remain options. It also
+explains why the Strouhal number is the animation constant and why an animal longer
+than 26 m can never be seen whole. Kept separate on purpose: one file is fact, the
+other is argument.
 
 ## Licence
 

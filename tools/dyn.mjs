@@ -34,6 +34,7 @@ const { HELM } = await import('../src/hull.js');
 const { headingDir, screenRight } = await import('../src/controls.js');
 const A = await import('../src/acoustics.js');
 const LIFE = await import('../src/life.js');
+const CREATURE = await import('../src/creatures.js');
 const { Acoustics } = A;
 
 const DT = 1 / 60;                    // fixed. The whole reason this file exists.
@@ -423,6 +424,32 @@ function mimic() {
 }
 
 /* ===================================================================== */
+function creature() {
+  hr('FIRST CREATURE  —  swimming is a relation, not a clip');
+  let monotonic = true, prev = -1;
+  for (let i = 0; i <= 100; i++) {
+    const a = CREATURE.amplitudeEnvelope(i / 100);
+    monotonic = monotonic && Number.isFinite(a) && a >= prev;
+    prev = a;
+  }
+  let proportional = true;
+  for (const speed of [0, 0.3, 0.9, 1.8, 4.4]) {
+    const fBeat = CREATURE.tailbeatFrequency(speed);
+    const st = speed > 0 ? fBeat * CREATURE.TAIL_AMPLITUDE / speed : CREATURE.STROUHAL;
+    proportional = proportional && Number.isFinite(fBeat)
+      && (speed === 0 ? fBeat === 0 : Math.abs(st - CREATURE.STROUHAL) < 1e-9);
+    console.log(`  speed ${speed.toFixed(1)} m/s  tailbeat ${fBeat.toFixed(2)} Hz  St ${st.toFixed(2)}`);
+  }
+  const hidden = CREATURE.mimicPresence(20, 90);
+  const nearHatch = CREATURE.mimicPresence(90, 8);
+  const revealed = CREATURE.mimicPresence(90, 90);
+  console.log(`  envelope monotonic ${monotonic}  zero-speed finite ${CREATURE.tailbeatFrequency(0) === 0}`);
+  console.log(`  presence before learning ${hidden.toFixed(2)}, at hatch ${nearHatch.toFixed(2)}, learned/open water ${revealed.toFixed(2)}`);
+  const ok = monotonic && proportional && hidden === 0 && nearHatch === 0 && revealed > 0.99;
+  console.log(`  ${ok ? 'motion and reveal obey the creature design' : 'CREATURE GATE FAILED'}`);
+}
+
+/* ===================================================================== */
 function stuck() {
   hr('NO STUCK VOICES  —  everything back to its floor after the excitement');
   const r = rig(120);
@@ -448,7 +475,7 @@ function stuck() {
 }
 
 /* ===================================================================== */
-const SUITE = { constants, helm, scrubber, score, tank, descent, telegraph, ballast, silence, instrument, mimic, stuck };
+const SUITE = { constants, helm, scrubber, score, tank, descent, telegraph, ballast, silence, instrument, mimic, creature, stuck };
 for (const [name, fn] of Object.entries(SUITE)) {
   if (only && only !== name) continue;
   fn();

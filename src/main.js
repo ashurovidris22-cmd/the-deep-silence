@@ -15,6 +15,7 @@ import { Audio } from './audio.js';
 import { Life } from './life.js';
 import { FS_VERT, WATER } from './glsl.js';
 import { LampShadow, castsShadow } from './shadow.js';
+import { AcousticMimic } from './creatures.js';
 
 const qs = new URLSearchParams(location.search);
 const qNum = (k, d) => (qs.has(k) ? parseFloat(qs.get(k)) : d);
@@ -541,6 +542,12 @@ const vessel = new Vessel(boat.origin.clone(), 0);
 const ext = buildExterior();
 scene.add(ext.mesh);
 
+/* The sound that learned the way-home signal eventually acquires a body. It is
+ * deliberately independent of the audio device: `Acoustics` keeps learning even
+ * when sound is disabled, so muting the game cannot despawn a rule of the world. */
+const mimic = new AcousticMimic(env);
+scene.add(mimic.root);
+
 /* Real geometry casts. Alpha-cutout flora and marine snow stay out until the
  * depth pass can reproduce their silhouettes rather than solid billboards. */
 for (const o of [terrain, rocks, station.mesh, sub.mesh, boat.mesh, ext.mesh]) castsShadow(o);
@@ -1003,6 +1010,7 @@ const game = {
    * hour to reach honestly. Setting `co2` drives the *real* model rather than the
    * overlay, so the vignette a frame shows is the one a player would get. */
   life: () => life,
+  creature: () => mimic,
   pose: (n) => { applyPose(n); },
   /* Put the camera at a named station inside the boat.
    *
@@ -1310,6 +1318,7 @@ function frame() {
     }
   }
 
+  const boatRange = aboard ? 0 : hatchRange();
   audio.update(dt, {
     depth: game.depth, aboard, earZ: eyeL.z,
     throttle: vessel.throttle, ballast: vessel.ballast, ballastCmd: vessel.ballastCmd,
@@ -1318,8 +1327,16 @@ function frame() {
     breath: life.breath, alarm: life.alarm, phase: life.phase,
     scrubber: life.remaining,
     // Range to the trunk, not to the hull's centre — the pinger marks the way in.
-    boatRange: aboard ? 0 : hatchRange(),
+    boatRange,
     music: wantMusic,
+  });
+
+  /* Sound first, shape later. The same accumulated learning that controls the
+   * false pings controls the reveal; there is no separate scripted encounter. */
+  mimic.update(dt, {
+    swimmer: camera.position, boatRange, outside: !aboard,
+    lampPos: env.lampPos, lampDir: env.lampDir,
+    learn: audio.acoustics.mimicLearn,
   });
 
   renderer.info.reset();
