@@ -451,6 +451,164 @@ function creature() {
 }
 
 /* ===================================================================== */
+async function chain() {
+  hr('VERLET CHAIN  —  the design document predicted this would not be stable');
+  const { VerletChain, MAX_SUBSTEP, ITERATIONS } = await import('../src/chain.js');
+  const { COLONY_LENGTH, NODE_SPACING, NODES } = await import('../src/siphonophore.js');
+  console.log(`  colony ${COLONY_LENGTH.toFixed(0)} m over ${NODES} nodes at ${NODE_SPACING.toFixed(2)} m`);
+  console.log(`  substep cap ${(MAX_SUBSTEP * 1000).toFixed(1)} ms, ${ITERATIONS} relaxation iterations\n`);
+
+  /* Drive the anchor hard: 1.2 m/s of lateral swing is far more than the animal
+   * ever does, and the point is to find the limit rather than to confirm the
+   * happy path. `dt` 0.1 is not hypothetical — main.js clamps to exactly that
+   * and the software-rendering sandbox genuinely delivers it. */
+  const drive = (dtFrame, seconds, iterations, naive = false) => {
+    const c = new VerletChain(NODES, NODE_SPACING, [0, -400, 0], [0, 0, 1]);
+    const rest = (NODES - 1) * NODE_SPACING;
+    let worst = 0;
+    for (let t = 0; t < seconds; t += dtFrame) {
+      const anchor = [Math.sin(t * 1.9) * 1.2, -400 + Math.sin(t * 0.7) * 0.6, t * 0.35];
+      // `naive` bypasses the substep cap: one integration at the raw frame dt,
+      // which is exactly what an implementation without the cap would do.
+      if (naive) c._substep(dtFrame, anchor, iterations);
+      else c.update(dtFrame, anchor, iterations);
+      worst = Math.max(worst, c.maxStretch());
+    }
+    return { finite: c.finite(), worst, arc: c.arcLength(), rest, span: c.span() };
+  };
+
+  console.log('    dt      iters   worst stretch   arc/rest   finite');
+  let allOk = true;
+  for (const [dtFrame, iters] of [[1 / 60, ITERATIONS], [1 / 30, ITERATIONS],
+    [0.1, ITERATIONS], [0.1, 1], [0.25, ITERATIONS]]) {
+    const r = drive(dtFrame, 40, iters);
+    const ratio = r.arc / r.rest;
+    /* Two per cent of stretch is the gate. A distance constraint solved by
+     * relaxation never reaches zero error, so demanding exactly rigid would be
+     * demanding the wrong thing; two per cent of 1.5 m is 3 cm, which at the
+     * 26 m this animal is seen from is a sixth of a pixel. */
+    const ok = r.finite && ratio < 1.02 && r.worst < 0.25;
+    allOk = allOk && ok;
+    console.log(`  ${dtFrame.toFixed(4)}    ${String(iters).padStart(2)}      ${f(r.worst, 4)}`
+      + `        ${f(ratio, 4)}     ${r.finite ? 'yes' : 'NaN'}   ${ok ? 'ok' : 'over'}`);
+  }
+
+  /* The design document's prediction, tested rather than believed: "a Verlet
+   * chain is stable at dt clamped to 0.1 (it will not be, at three iterations)".
+   * The naive control integrates once at the raw frame dt, which is what an
+   * implementation without the substep cap would do — and the interesting
+   * result is HOW it fails: it does not go NaN, it goes wrong, which is worse,
+   * because wrong still renders. The fix in chain.js is the substep cap, and
+   * these two rows are the measurement that it is the cap doing the work. */
+  const naive = drive(0.1, 40, 3, true);
+  const solved = drive(0.1, 40, ITERATIONS);
+  console.log(`\n  naive, dt 0.1 x 3 iterations:  worst stretch ${f(naive.worst, 3)}  arc/rest ${f(naive.arc / naive.rest, 4)}  finite ${naive.finite}`);
+  console.log(`  capped, dt 0.1 x ${ITERATIONS} iterations: worst stretch ${f(solved.worst, 3)}  arc/rest ${f(solved.arc / solved.rest, 4)}`);
+  const controlShowsWhy = !naive.finite || naive.worst > solved.worst * 5;
+
+  /* Zero speed, zero dt, and a chain asked to do nothing. The design document
+   * asks for exactly this: "nothing goes NaN when speed is zero". */
+  const idle = new VerletChain(NODES, NODE_SPACING, [0, -400, 0], [0, 0, 1]);
+  for (let i = 0; i < 600; i++) idle.update(1 / 60, [0, -400, 0]);
+  idle.update(0, [0, -400, 0]);
+  const idleOk = idle.finite() && idle.maxStretch() < 0.02;
+  console.log(`  at rest for 10 s: finite ${idle.finite()}, worst stretch ${f(idle.maxStretch(), 4)}`);
+
+  const ok = allOk && idleOk && controlShowsWhy;
+  console.log(`  ${ok ? 'the chain holds at every frame rate the game can produce, and the control shows why'
+    : 'CHAIN GATE FAILED'}`);
+}
+
+/* ===================================================================== */
+async function colony() {
+  hr('SIPHONOPHORE  —  45 m of animal against 26 m of water');
+  const S = await import('../src/siphonophore.js');
+  /* The optics do the monster design, and this is the arithmetic behind that
+   * claim rather than a restatement of it. Duntley contrast visibility is
+   * 4.8/c; the colony is longer than that by construction, so the fraction of
+   * it that can ever be in frame at once is fixed by the water. */
+  const vis = 26.0;
+  const frac = vis / S.COLONY_LENGTH;
+  console.log(`  colony length      ${f(S.COLONY_LENGTH, 1)} m   (Apolemia reach 45 m)`);
+  console.log(`  Duntley visibility ${f(vis, 1)} m`);
+  console.log(`  most of it ever visible at once: ${(frac * 100).toFixed(0)}%  ${frac < 1 ? '— it can never be seen whole' : 'SEEN WHOLE'}`);
+
+  /* Bioluminescence reaches further than reflection, which is the reveal
+   * grammar the whole roster is built on: a light first, a body later. */
+  console.log(`  photophores legible to ${f(S.BIOLUM_RANGE, 1)} m, ${(S.BIOLUM_RANGE / vis).toFixed(2)}x the reflective range`);
+
+  /* Presence: it is indifferent, so it does not hunt — but it must not spawn
+   * on top of the player either, and it belongs below the photic zone. */
+  const rows = [
+    ['aboard the boat', S.colonyPresence({ outside: false, depth: 400, range: 60 })],
+    ['on the shelf', S.colonyPresence({ outside: true, depth: 60, range: 60 })],
+    ['at the hatch', S.colonyPresence({ outside: true, depth: 400, range: 6 })],
+    ['deep, open water', S.colonyPresence({ outside: true, depth: 400, range: 60 })],
+  ];
+  for (const [what, p] of rows) console.log(`    ${what.padEnd(18)} ${f(p, 2)}`);
+  const presenceOk = rows[0][1] === 0 && rows[1][1] === 0 && rows[2][1] === 0 && rows[3][1] > 0.99;
+
+  /* Speed. "The scariest creature is the slowest", and it is also the cheapest
+   * to animate — so this is a design claim with a number attached rather than
+   * a mood. A swimmer cruises at 4.4 m/s; the colony must never be a chase. */
+  const swimmer = 4.4;
+  console.log(`  drift speed ${f(S.DRIFT_SPEED, 2)} m/s against a swimmer's ${f(swimmer, 1)} m/s`
+    + `  — ${(swimmer / S.DRIFT_SPEED).toFixed(0)}x slower, so it cannot pursue`);
+
+  /* The pulse travels down the colony rather than flashing all at once. A
+   * synchronised chain is a string of fairy lights; a travelling wave is a
+   * nervous system. The honest assertion is that the CREST MOVES: find the
+   * brightest arc position at two times and check it advanced by the wave
+   * speed. (A first draft asserted adjacent samples always differ, which a
+   * travelling wave legitimately fails — two points between crests are both
+   * exactly zero. The gate was wrong, not the wave.) */
+  const crest = (t) => {
+    let bs = 0, bv = -1;
+    for (let i = 0; i <= 4000; i++) {
+      const v = S.pulseAt(i / 4000, t);
+      if (v > bv) { bv = v; bs = i / 4000; }
+    }
+    return bs;
+  };
+  /* Modulo the crest spacing: the wave has PULSE_K identical crests, so argmax
+   * may land on any of them — floating point at the grid points decides the
+   * tie. What is invariant is the displacement mod 1/PULSE_K. */
+  const dtWave = 0.5;
+  const spacing = 1 / S.PULSE_K;
+  const raw = crest(dtWave) - crest(0);
+  const moved = ((raw % spacing) + spacing) % spacing;
+  const expected = S.PULSE_W * dtWave / S.PULSE_K;
+  const travels = Math.abs(moved - expected) < 1e-3;
+  let finite = true;
+  for (let i = 0; i <= 40; i++) finite = finite && Number.isFinite(S.pulseAt(i / 40, 0));
+  console.log(`  crest moved ${(moved * 1000).toFixed(1)} per mille of body in ${dtWave} s`
+    + ` (wave speed says ${(expected * 1000).toFixed(1)})  finite at t=0 ${finite}`);
+
+  /* Does the animal still exist after the boat moves?
+   *
+   * Its path is closed and bounded at about 37 m from wherever it spawned, so
+   * a colony born at the player's first excursion stays there for ever. Drive
+   * anywhere else and it is out of the world — not rare, gone. Simulate that:
+   * spawn near the origin, then swim 300 m away and ask whether anything is
+   * within reach. */
+  const colony = new S.Siphonophore({ register() {} });
+  const here = new THREE.Vector3(0, -400, 0);
+  const stateAt = (p) => ({ swimmer: p, outside: true, depth: 400 });
+  for (let i = 0; i < 60 * 12; i++) colony.update(DT, stateAt(here));
+  const bornWithin = colony.nearestNode(here);
+  const far = new THREE.Vector3(300, -400, 120);
+  for (let i = 0; i < 60 * 12; i++) colony.update(DT, stateAt(far));
+  const afterMove = colony.nearestNode(far);
+  console.log(`  born ${f(bornWithin, 1)} m from the swimmer, and after moving 300 m: ${f(afterMove, 1)} m`);
+  const reachable = afterMove < S.RESEED_RANGE;
+  console.log(`  re-seeds when abandoned (limit ${S.RESEED_RANGE} m) ${reachable ? 'ok' : 'STRANDED'}`);
+
+  const ok = frac < 1 && S.BIOLUM_RANGE > vis && presenceOk
+    && S.DRIFT_SPEED < swimmer / 10 && travels && finite && reachable;
+  console.log(`  ${ok ? 'the optics, not the design, decide what the player sees' : 'COLONY GATE FAILED'}`);
+}
+
+/* ===================================================================== */
 function recorder() {
   hr('DEEP RECORDER  —  recovery is a commitment, not a proximity pickup');
   const target = new THREE.Vector3(4, -392, 7);
@@ -469,19 +627,77 @@ function recorder() {
   const dropped = new RECORDER.RecorderState(target);
   dropped.begin(swimmer);
   for (let i = 0; i < 60 * 1.2; i++) dropped.update(DT, { swimmer, holding: true, outside: true });
-  swimmer.x += 6;
-  dropped.update(DT, { swimmer, holding: true, outside: true });
+  const away = target.clone().add(new THREE.Vector3(6, 0, 0));
+  dropped.update(DT, { swimmer: away, holding: true, outside: true });
   const interrupted = dropped.phase === 'sealed' && dropped.progress < 1;
+  /* And it has to keep costing. The old assertion stopped here, at `progress <
+   * 1` — trivially true one frame after a 4.2 s job began, so it passed while
+   * the decay it was supposed to be checking ran for exactly one frame and
+   * never again. Hold the swimmer away and require the clamps to actually
+   * re-seat. */
+  for (let i = 0; i < 60 * 1.5; i++) dropped.update(DT, { swimmer: away, holding: false, outside: true });
+  const reseals = dropped.progress === 0;
 
-  const ok = began && !early && carried && deniedAtSea && delivered && interrupted;
+  /* The test the bug would have failed: can the box be freed in safe nibbles?
+   *
+   * Five one-second visits with half a minute away between each. Before the
+   * fix this recovered it on the fifth visit — the 4.2 exposed seconds the
+   * objective is built on were payable in instalments. */
+  const nibble = new RECORDER.RecorderState(target);
+  let visits = 0;
+  for (; visits < 8 && !nibble.carrying; visits++) {
+    nibble.begin(swimmer);
+    for (let i = 0; i < 60 && !nibble.carrying; i++) {
+      nibble.update(DT, { swimmer, holding: true, outside: true });
+    }
+    if (nibble.carrying) break;
+    for (let i = 0; i < 60 * 30; i++) nibble.update(DT, { swimmer: away, holding: false, outside: true });
+  }
+  const nibbleFails = !nibble.carrying;
+
+  const ok = began && !early && carried && deniedAtSea && delivered && interrupted
+    && reseals && nibbleFails;
   console.log(`  began in range ${began}  premature pickup ${early}`);
   console.log(`  carried after ${RECORDER.RECOVERY_TIME.toFixed(1)} s ${carried}`);
   console.log(`  delivery denied outside ${deniedAtSea}  accepted aboard ${delivered}`);
   console.log(`  leaving the clamps interrupts recovery ${interrupted}`);
+  console.log(`  and the clamps re-seat: progress back to ${dropped.progress.toFixed(3)}`
+    + ` at ${RECORDER.RESEAL_RATE}/s ${reseals ? 'ok' : 'STILL BANKED'}`);
+  console.log(`  eight 1 s nibbles, 30 s apart: ${nibbleFails ? 'never recovers it' : `RECOVERED on visit ${visits + 1}`}`);
   console.log(`  ${ok ? 'recovery, interruption and return gates hold' : 'RECORDER GATE FAILED'}`);
 }
 
 /* ===================================================================== */
+async function rocks() {
+  hr('BOULDERS  —  placement rules hold, and the field now pushes back');
+  const { rockPlacements, rockBlockers, rockSlopeAt } = await import('../src/props.js');
+  /* The game's parameters, minus main.js's hand-kept clear list — the gate
+   * tests the mechanism with one representative spot rather than transcribing
+   * data it does not own. Same seed, so this is the shipped rand sequence. */
+  const spot = { x: 30, z: -18, r: 15 };
+  const P = rockPlacements(520, 420, [spot]);
+  let minClear = Infinity, maxSlope = 0, floating = 0, buried = true;
+  for (const p of P) {
+    minClear = Math.min(minClear, Math.hypot(p.x - spot.x, p.z - spot.z) - spot.r);
+    maxSlope = Math.max(maxSlope, rockSlopeAt(p.x, p.z));
+    if (p.y >= seabedHeight(p.x, p.z)) floating++;
+    buried = buried && p.y < seabedHeight(p.x, p.z);
+  }
+  const B = rockBlockers(P);
+  let badCap = 0;
+  for (const b of B) {
+    const ok = b.r >= 0.55 && b.b[1] >= b.a[1] && b.a[0] === b.b[0] && b.a[2] === b.b[2];
+    if (!ok) badCap++;
+  }
+  console.log(`  placed ${P.length} of 520 asked   blockers ${B.length}   scree left open ${P.length - B.length}`);
+  console.log(`  nearest to the cleared footprint  ${f(minClear)} m outside it  ${minClear > 0 ? 'ok' : 'INSIDE'}`);
+  console.log(`  steepest ground under a boulder   ${f(maxSlope)}  limit 0.78  ${maxSlope <= 0.78 ? 'ok' : 'ON A WALL'}`);
+  console.log(`  bedded into the sediment          ${buried ? 'all of them' : `${floating} FLOATING`}`);
+  console.log(`  capsules vertical, capped, r >= 0.55  ${badCap === 0 ? 'all' : `${badCap} MALFORMED`}`);
+  const share = B.length / P.length;
+  console.log(`  the large tail carries collision: ${(share * 100).toFixed(0)}% of the field, ${share > 0.15 && share < 0.85 ? 'a tail rather than everything' : 'SHARE OFF'}`);
+}
+
 function stuck() {
   hr('NO STUCK VOICES  —  everything back to its floor after the excitement');
   const r = rig(120);
@@ -507,9 +723,9 @@ function stuck() {
 }
 
 /* ===================================================================== */
-const SUITE = { constants, helm, scrubber, score, tank, descent, telegraph, ballast, silence, instrument, mimic, creature, recorder, stuck };
+const SUITE = { constants, helm, scrubber, score, tank, descent, telegraph, ballast, silence, instrument, mimic, creature, chain, colony, recorder, rocks, stuck };
 for (const [name, fn] of Object.entries(SUITE)) {
   if (only && only !== name) continue;
-  fn();
+  await fn();
 }
 console.log('');

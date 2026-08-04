@@ -67,13 +67,31 @@ export const GPU_ARGS = [
   '--hide-scrollbars',
 ];
 
+/* The subset of GPU_ARGS that forces software rendering. Kept apart because a
+ * browser with a real GPU may refuse them: Edge on Windows dies with an access
+ * violation (0xC0000005) before printing a DevTools endpoint when handed the
+ * SwiftShader trio. A machine that kills the software path is a machine that
+ * has a hardware one, so the retry below strips exactly these and no more. */
+const SOFT_GL_ARGS = new Set([
+  '--enable-unsafe-swiftshader',
+  '--use-gl=angle',
+  '--use-angle=swiftshader',
+  '--ignore-gpu-blocklist',
+]);
+
 export async function launch(opts = {}) {
   // Only when there is no cache to resolve from: a bundled browser is matched
   // to the driver and must win over whatever is loose on PATH.
   const exe = !process.env.PLAYWRIGHT_BROWSERS_PATH && process.env.CHROME_PATH
     ? { executablePath: process.env.CHROME_PATH }
     : {};
-  return chromium.launch({ headless: true, args: GPU_ARGS, ...exe, ...opts });
+  try {
+    return await chromium.launch({ headless: true, args: GPU_ARGS, ...exe, ...opts });
+  } catch (e) {
+    if (!/exited early/i.test(String(e && e.message))) throw e;
+    const args = GPU_ARGS.filter((a) => !SOFT_GL_ARGS.has(a));
+    return chromium.launch({ headless: true, args, ...exe, ...opts });
+  }
 }
 
 export async function newPage(browser, { w = 1600, h = 900, dpr = 1 } = {}) {

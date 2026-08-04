@@ -164,3 +164,116 @@ paragraphs inside section 1b.
 - **Strip baselines carefully.** `grep -v '^#'` leaves a blank line the baselines
   do not have and reports a one-line difference that is entirely your own. Look at
   the diff before believing the verdict.
+
+---
+
+## Machine 4 - the owner's Windows 11 laptop, node v24.18.0, 2026-08
+
+The first machine with a real GPU: `ANGLE (NVIDIA GeForce RTX 5070 Ti Laptop,
+D3D11)`. Both arithmetic gates passed byte-identical to `reference/` before
+anything was touched. The copy arrived as a plain directory with **no `.git`**,
+so nothing here is committed - re-establish the repository before the next
+session loses this one's record.
+
+### The browser is Edge, and the SwiftShader flags kill it
+
+No Chrome, no Playwright cache; `C:\Program Files (x86)\Microsoft\Edge\
+Application\msedge.exe` is what Windows 11 guarantees. Two harness changes, both
+now in `tools/`:
+
+- `cdp.mjs` `BROWSER_CANDIDATES` gained the four standard Windows install paths,
+  Edge last because Chrome matches the harness's history when both exist.
+- **Edge crashes with 0xC0000005 before printing a DevTools endpoint when handed
+  the SwiftShader trio** (`--use-gl=angle --use-angle=swiftshader
+  --enable-unsafe-swiftshader`). `boot.mjs` `launch()` now retries a launch that
+  "exited early" with those flags stripped - a browser that kills the software
+  path is a browser that has a hardware one. No env vars needed; `node
+  tools/survey.mjs` just works.
+
+### What a real GPU changes
+
+- **A frame settles in about five seconds**, against 15-30 s under SwiftShader.
+  The whole 33-frame survey is under three minutes.
+
+**CORRECTION, measured later the same session.** The paragraph that stood here
+claimed "settle 1500 ms is ~90 real frames, so exposure adaptation actually
+converges", and used that to explain `l-nosnow` reading 305 against an older
+baseline of 335. Both halves were wrong, and the second was wrong in a way that
+delayed finding a real bug - `l-nosnow` was the stale-sea-surface defect (see
+`HANDOFF.md`), not adaptation. The frame rate was never measured; it was
+inferred from the survey's five-seconds-per-shot, which is wall clock for a
+whole boot-settle-screenshot-readStats cycle. Asked directly, the page says:
+
+```
+  over 1500 ms:    4 frames  = 2.7 fps
+  over 3000 ms:    6 frames  = 2.0 fps
+  5 screenshots advanced the page by 30 frames
+  g.fps reports 10.0
+```
+
+So headless Chrome throttles `requestAnimationFrame` to about 2 fps when nothing
+is compositing, and **`Page.captureScreenshot` is what actually drives the page**
+- six frames per capture. A 1500 ms settle is roughly *four* frames, not ninety.
+
+Three consequences:
+
+- **The harness's timing is as meaningless here as on every previous machine**,
+  real GPU or not. Note that `g.fps` reads exactly **10.0** - the same number
+  HANDOFF section 3 records for the cloud browser, and for the same reason. The
+  only trustworthy performance figures remain the ones measured in the owner's
+  own browser (183/240 fps).
+- **Review frames are still correct, and it is worth knowing why**: `applyPose`
+  and `inside()` call `adaptExposure(0, true)`, which *snaps*. The survey does
+  not depend on convergence, so it survives a 4-frame settle. Anything that
+  needed to settle would not.
+- `dt` is clamped to 0.1, so those four frames advance simulated time by about
+  0.4 s. Any animation judged from a still here is being seen a fraction of a
+  second after setup, not at a steady state.
+
+HANDOFF section 4's rule was right all along and applies unchanged on this
+machine: **wait on `g.frames`, not on the clock** - and do not measure time in a
+browser at all.
+
+### Phase dependence moves the mean, not just `max`
+
+Machine 3 established that `max` is unreliable in any frame containing a
+periodic light. Two full surveys run back to back here, with everything else
+fixed, leaves exactly two frames disagreeing with themselves:
+
+```
+  frame          baseline    run1    run2   run-to-run
+  C-fwd           184.5     187.0   185.0        2.0
+  z-galley        154.4     155.9   154.8        1.1
+```
+
+Both are interior frames containing animated emissive lamps - the sonar sweep
+at the helm, the switchboard and scrubber indicators. So the phase dependence
+reaches the **mean** as well, at about 1% of it. Judge an interior frame moved
+only past about 2.5 on the mean; below that it may be the sonar. Everything
+else in the set repeats to within 1.0.
+- `h-deep-dark` `max` came out 342-416 across runs: the strobe phase note from
+  machine 3 confirmed on different hardware.
+- Rendered audio (`listen.mjs --mode render`): `blow` matches machine 3 to four
+  decimals (rms 0.05803, peak 0.2435, crest 4.2, 8 kHz octave on top). One
+  divergence: `voices open at end 1` against machine 3's 0 - the blow tail is
+  still ringing at the 8 s cutoff and this browser counts it; `descent` shows 5
+  for the same reason (last creaks decaying). The graph-mode released-voices
+  gate still passes, so this is end-of-render accounting, not a leak.
+
+### Windows shell traps
+
+- PowerShell 5.1 is the shell. `2>&1` on a native command wraps stderr in
+  ErrorRecords and can garble the first line into mojibake; redirect with `*>`
+  to a file and read the file.
+- `npm` is broken through this harness (its own .ps1 shim fails resolving the
+  node prefix), but nothing needs it: the CDP shim plus vendored three.js cover
+  everything, which is exactly what they were built for.
+- `python` exists (3.14); `pip install pillow numpy` for the frame statistics.
+- **No ffmpeg, so `tools/sheet.mjs` cannot run here.** The contact sheets were
+  built with a short PIL script instead — which turned out to be an upgrade:
+  ffmpeg here never had freetype, so `sheet.mjs`'s own comment concedes the
+  tiles cannot carry their names and prints a reading order instead. PIL draws
+  the label under each tile. If someone is on a machine with both, a labelled
+  sheet is worth more than a fast one.
+- Background processes started by the agent harness are killed between
+  commands; start the HTTP server with `Start-Process` (detached) instead.

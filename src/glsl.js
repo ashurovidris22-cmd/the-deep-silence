@@ -224,13 +224,30 @@ float phaseHG(float cosT, float g){
  * material that ever failed to register would have rendered a 24 degree cone at
  * a tenth of the intensity, and looked merely wrong rather than broken.
  *
- * Attenuation is deliberately NOT folded in here. The three forms in the
- * codebase differ for reasons rather than by drift: surfaces use 1/(6 + d^2)
- * where the 6 is a finite lens rather than a mathematical point, the volumetric
- * march uses 1/(1 + 0.9 d^2), and marine snow uses 1/(1 + 4.5 d^2) to keep
- * particles from lighting up across the whole beam. One owner per fact means
- * one owner for the cone; it does not mean pretending three facts are one.
+ * The volumetric and snow attenuations are deliberately NOT folded in here.
+ * Those forms differ from the surface one for reasons rather than by drift:
+ * the volumetric march uses 1/(1 + 0.9 d^2), and marine snow uses
+ * 1/(1 + 4.5 d^2) to keep particles from lighting up across the whole beam.
+ * One owner per fact does not mean pretending three facts are one.
+ *
+ * The SURFACE attenuation, though, is one fact — and it had become ten copies
+ * across eight files, which is exactly how the cone drifted before this block
+ * existed. It lives in LAMP_ATTEN below, with its constant as a uniform so the
+ * near-field can be measured live instead of recompiled per guess.
  */
+
+/** Surface response to the lamp: inverse square against a finite source.
+ *
+ * uLampR0 has units of m² — it is the square of an effective source radius,
+ * and it is what caps the 1/d² hotspot where the beam meets a surface close
+ * to the lens. Owned by Env.lampR0; every material shares the one value.
+ * Included by LAMP, and directly by the materials (flora, props) that carry
+ * their own slim uniform blocks because they never sample the shadow map. */
+export const LAMP_ATTEN = /* glsl */`
+uniform float uLampR0;
+float lampAtten(float dL){ return uLampInt / (uLampR0 + dL*dL); }
+`;
+
 export const LAMP = /* glsl */`
 uniform vec3 uLampPos;
 uniform vec3 uLampDir;
@@ -247,6 +264,8 @@ uniform float uShadowNear;
 uniform float uShadowFar;
 uniform float uShadowOn;
 uniform float uShadowBiasScale;
+
+${LAMP_ATTEN}
 
 /* The cone. Brightest on axis, zero at uLampCos - uLampSoft brightens the core
  * inward, it does not widen the edge. */

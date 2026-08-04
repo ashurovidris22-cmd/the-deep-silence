@@ -24,7 +24,12 @@ const PRE = `g.setLayer('hud',false); g.setLayer('kelp',true); g.setLayer('rocks
   g.setLayer('snow',true); g.setLayer('terrain',true); g.setLayer('beacons',true);
   g.setLayer('station',true); g.setLayer('sub',true);
   g.setLayer('turf',true); g.setLayer('pens',true);
-  g.setLayer('sponges',true); g.setLayer('whips',true);`;
+  g.setLayer('sponges',true); g.setLayer('whips',true);
+  g.setLayer('colony',false);`;
+/* The colony is OFF for the standard set, deliberately. It spawns on any deep
+ * exterior camera and then drifts on its own path, so a frame it wandered into
+ * could never be diffed against a baseline — the trunk strobe's phase problem,
+ * roaming. It has its own probe shots (tools/shot.mjs pairs) instead. */
 
 const SHOTS = [
   ['a-shelf',   `g.pose('shelf');`],

@@ -12,7 +12,19 @@ export const RECOVERY_TIME = 4.2;
 export const INTERACT_RANGE = 2.15;
 export const CARRY_EFFORT = 0.22;       // extra metabolic O2, litres/min
 
+/* How fast the clamps re-seat when you let go, in fraction per second.
+ *
+ * Fast — a full 4.2 s of work is undone in 0.55 s — and it has to be, because
+ * this rate is the entire difference between "four exposed seconds" and "four
+ * seconds, in whatever increments you like". Exported so the gate in
+ * `tools/dyn.mjs` measures the shipped number instead of a copy of it. */
+export const RESEAL_RATE = 1.8;
+
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
+
+/* Where the box rides once it is free. Hoisted because it was being allocated
+ * inside the frame loop's update. */
+const CARRY_OFFSET = new THREE.Vector3(0.34, -0.42, -0.18);
 
 export class RecorderState {
   constructor(position = { x: 0, y: 0, z: 0 }) {
@@ -20,7 +32,6 @@ export class RecorderState {
     this.home = this.position.clone();
     this.phase = 'sealed';              // sealed | extracting | carried | returned
     this.progress = 0;
-    this.carrier = null;
     this.recovered = false;
   }
 
@@ -39,26 +50,44 @@ export class RecorderState {
 
   update(dt, { swimmer, holding = false, outside = false }) {
     if (this.phase === 'extracting') {
-      if (!outside || !holding || this.rangeTo(swimmer) > INTERACT_RANGE + 0.35) {
-        this.phase = 'sealed';
-        this.progress = Math.max(0, this.progress - dt * 1.8);
-      } else {
+      const held = outside && holding && this.rangeTo(swimmer) <= INTERACT_RANGE + 0.35;
+      if (held) {
         this.progress = clamp01(this.progress + dt / RECOVERY_TIME);
         if (this.progress >= 1) {
           this.phase = 'carried';
           this.recovered = true;
         }
+      } else {
+        this.phase = 'sealed';
       }
     }
+
+    /* The clamps re-seat themselves, and this MUST sit outside the branch above.
+     *
+     * It used to be the second line of the interruption case — whose first line
+     * sets the phase to 'sealed', so the branch could never run again and the
+     * decay executed for exactly one frame. `begin()` does not reset progress,
+     * so the effect was that extraction *banked*: measured, five separate
+     * one-second visits with thirty seconds away between each recovered the box
+     * in five 1 s exposures instead of one 4.2 s exposure. The commitment the
+     * whole objective is built on simply was not there.
+     *
+     * The existing gate passed throughout, because it asserted `phase ===
+     * 'sealed' && progress < 1` — both trivially true. A gate that cannot fail
+     * is a gate that is not testing anything; `dyn.mjs --only recorder` now
+     * nibbles at it and requires the attempt to fail. */
+    if (this.phase === 'sealed' && this.progress > 0) {
+      this.progress = Math.max(0, this.progress - dt * RESEAL_RATE);
+    }
+
     if (this.phase === 'carried') {
-      this.position.copy(swimmer).add(new THREE.Vector3(0.34, -0.42, -0.18));
+      this.position.copy(swimmer).add(CARRY_OFFSET);
     }
   }
 
   deliver(aboard) {
     if (!aboard || this.phase !== 'carried') return false;
     this.phase = 'returned';
-    this.carrier = null;
     return true;
   }
 
@@ -80,6 +109,7 @@ function recorderMaterial() {
       uScatterGain: { value: 1 }, uAmbientFloor: { value: new THREE.Vector3() },
       uLampPos: { value: new THREE.Vector3() }, uLampDir: { value: new THREE.Vector3(0,0,-1) },
       uLampCol: { value: new THREE.Vector3(1,0.97,0.92) }, uLampInt: { value: 900 },
+      uLampR0: { value: 20 },
       uLampCos: { value: Math.cos(0.74) }, uLampSoft: { value: 0.34 },
       uShadowMap: { value: null }, uLampVP: { value: new THREE.Matrix4() },
       uShadowSize: { value: 1024 }, uShadowTanHalf: { value: Math.tan(0.74) },
@@ -98,7 +128,7 @@ function recorderMaterial() {
       void main(){
         vec3 L=uLampPos-vW; float d=length(L); vec3 ld=L/max(d,0.001);
         float light=lampCone(-ld)*clamp((dot(normalize(vN),ld)+0.18)/1.18,0.0,1.0)
-          *uLampInt/(6.0+d*d)*lampShadow(vW,normalize(vN));
+          *lampAtten(d)*lampShadow(vW,normalize(vN));
         vec3 lit=uLampCol*light*lampTransmit(d);
         vec3 base=vec3(0.024,0.031,0.028)*(ambientAt(vW.y)+lit);
         float pulse=pow(max(0.0,sin(uTime*2.35)),18.0)*(1.0-uRecovered);

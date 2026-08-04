@@ -10,11 +10,17 @@ ever increases. Not Barotrauma's art style.
 **Status: she can be driven, walked around inside, heard, and left.** The optics,
 the seabed, the flora, the post chain, a furnished eighteen-metre pressure hull,
 the vessel dynamics, the sound layer and a timed excursion outside the hull all
-exist. The canyon now has its first inhabitant: the acoustic mimic that learns the
-way-home signal eventually resolves into a lamp-shy anguilliform swimmer. The first
-complete objective now asks the player to descend to the wreck, free a deep recorder
-under exposure, carry it home on the finite scrubber, and live with what the recovery
-wakes.
+exist. The first complete objective asks the player to descend to the wreck, free
+a deep recorder under exposure, carry it home on the finite scrubber, and live
+with what the recovery wakes.
+
+The canyon has two inhabitants, and they are opposites on purpose. The **acoustic
+mimic** learns the way-home pinger, answers it wrongly, and eventually resolves
+into a lamp-shy anguilliform swimmer — it reacts to you. The **siphonophore** is
+forty-five metres of colony drifting on a path whose equation contains no term
+for the player at all; against twenty-six metres of visibility it can never be
+seen whole, and it arrives as a travelling wave of light long before it is a
+body. One of them is aware of you. Knowing which is the horror.
 
 ## Why the water is not art-directed
 
@@ -54,7 +60,9 @@ src/jerlov.js       seawater optics constants, depth zones, pressure
 src/life.js         the suit's CO2 scrubber — why you come back
 src/acoustics.js    underwater acoustics, and the state-to-sound map. Pure maths
 src/audio.js        the synthesiser: owns the AudioContext, decides nothing
+src/chain.js        Verlet chains, with the substep cap that makes them stable
 src/creatures.js    the acoustic mimic's body and Strouhal-derived swimming
+src/siphonophore.js a 45 m colony that drifts and does not know you are there
 src/recorder.js     the first recovery objective: extraction, carriage and return
 src/glsl.js         shared GLSL: noise, the water model, phase function
 src/terrain.js      seabed heightfield (CPU, for exact normals) + the light ramp
@@ -179,6 +187,20 @@ distance signal ever built and needs no interface at all. The strobe marks the
 *trunk* rather than the middle of the hull, because what a lost swimmer needs is
 not the boat, it is the way in.
 
+The wrist unit therefore shows a bearing arrow and **no range**, and that
+absence is load-bearing. It printed the range in metres for two passes, which
+cost nothing visible and quietly disabled the best mechanic in the game: the
+thing in the canyon that answers the pinger exists to poison the distance
+channel, and a true metre count on the player's arm made the lie unhearable. The
+creature was built, gated and measured, and could not do its job. The fix was to
+delete a number.
+
+What is left is a pair. The objective readout gives the recorder's range and
+withholds its bearing, so the wreck has to be searched for. The wrist gives the
+boat's bearing and withholds its range, so the way home has to be listened for.
+Each instrument answers one of the two questions, and the other one costs you
+something — which is the only reason either of them is interesting.
+
 ## Why the canyon floor has no plants on it
 
 The brief was "vegetation on the seabed", and on the floor of a 440 m canyon
@@ -224,11 +246,13 @@ Nothing lives outside the repository. Clone it, then:
 
 ```
 python3 -m http.server 8123
-node tools/dyn.mjs                    # needs nothing installed
-node tools/listen.mjs --mode graph    # ditto
+node tools/gate.mjs                   # needs nothing installed
 ```
 
-Diff those against `reference/baseline-*.txt`. `HANDOFF.md` section 1b is the full
+`gate.mjs` runs both arithmetic harnesses and diffs them against
+`reference/baseline-*.txt` for you, which matters more than it sounds: the
+comparison has produced two false failures on two different machines, and on
+both the first instinct was to go hunting in the game. `HANDOFF.md` section 1b is the full
 bootstrap, including which environment facts are specific to the sandbox this was
 built in and should be re-tested rather than believed.
 
@@ -254,14 +278,15 @@ systematically instead:
 | `tools/survey.mjs` | the whole review set from one boot |
 | `tools/sheet.mjs` | tile frames into one contact sheet |
 | `tools/dyn.mjs` | dynamics as arithmetic, at a fixed 60 Hz. No browser |
+| `tools/dyn.mjs --only chain` | the Verlet solver against every frame rate the game can produce |
 | `tools/listen.mjs` | the audio graph: structurally, or as rendered samples |
 | `tools/vendorlink.mjs` | make the vendored three.js importable from node, offline |
+| `tools/gate.mjs` | run both arithmetic harnesses and diff them against `reference/` |
 
 ```
+node tools/gate.mjs
 node tools/survey.mjs --w 800 --h 450
 node tools/sheet.mjs shots/[a-l]-*.png --out shots/_sheet.png
-node tools/dyn.mjs
-node tools/listen.mjs --mode graph
 ```
 
 The contact sheet is the point. A reviewer shown one frame comments on that

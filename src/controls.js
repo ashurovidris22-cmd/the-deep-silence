@@ -120,6 +120,8 @@ export class Pilot {
     // whole optical range without a seabed eleven kilometres tall.
     this.bandTarget = 0;
     this.band = 0;
+    // Set by main.js from the auto=1 harness flag; false in normal play.
+    this.reviewBand = false;
 
     this.keys = new Set();
     this._bind();
@@ -163,12 +165,13 @@ export class Pilot {
       if (e.code === 'KeyL') this.toggleLamp?.();
       if (e.code === 'KeyV') this.toggleMode?.();
       if (e.code === 'KeyE') this.interact?.();
-      /* Additive, and now a secondary control rather than the way you descend.
-       * With a four-hundred-metre canyon in the world, descending is swimming
-       * down it; this only offsets the surface so the optics beyond the world's
-       * own range can still be reached and inspected. */
-      if (e.code === 'BracketRight') this.bandTarget = Math.min(5600, this.bandTarget + 70);
-      if (e.code === 'BracketLeft') this.bandTarget = Math.max(0, this.bandTarget - 70);
+      /* Review-only, gated the way ?depth= is: an offset surface desynchronises
+       * the world from the player, so the keys answer only under the harness
+       * flag. In play, descending is swimming down the canyon. */
+      if (this.reviewBand) {
+        if (e.code === 'BracketRight') this.bandTarget = Math.min(5600, this.bandTarget + 70);
+        if (e.code === 'BracketLeft') this.bandTarget = Math.max(0, this.bandTarget - 70);
+      }
       if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'ShiftLeft'].includes(e.code)) e.preventDefault();
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));

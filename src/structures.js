@@ -329,6 +329,7 @@ export function structureMaterial() {
        * is only ever wrong when something else fails is a trap laid for the
        * next failure, not a default. */
       uLampInt: { value: 900 },
+      uLampR0: { value: 20 },
       uLampCos: { value: Math.cos(0.74) },
       uLampSoft: { value: 0.34 },
       /* The shadow block, with the map absent and the test off, so the material
@@ -467,7 +468,7 @@ export function structureMaterial() {
         float dL  = length(toL);
         vec3  L   = toL / max(dL,1e-4);
         float cone = lampCone(L);
-        float atten = uLampInt / (6.0 + dL*dL*1.0);
+        float atten = lampAtten(dL);
         float ndl = max(dot(n, L), 0.0);
         /* The occlusion term multiplies the lamp itself, so it takes the wet
          * specular below with it. A highlight surviving inside a shadow is the

@@ -94,6 +94,9 @@
     padding:3px 8px; border:1px solid rgba(159,211,221,.42); border-radius:2px;
     color:rgba(225,248,255,.98);
   }
+  /* Keyless prompts — the extraction readout is a progress report, not an
+     action — drop the badge out of the flex row, gap and all. */
+  #prompt kbd[hidden] { display:none; }
   #prompt[hidden] { display:none; }
 
   /* One objective, kept separate from instruments. It tells the player why they
@@ -168,22 +171,38 @@
 
 <!-- Contextual prompt. The single most important piece of UI in the build: with
      no prompt, standing next to a pilot's seat looks exactly like standing next
-     to a wall, and the player has no way to learn that E does anything. -->
-<div id="prompt" hidden><kbd>E</kbd><span id="promptText"></span></div>
+     to a wall, and the player has no way to learn that E does anything.
+
+     The badge is empty here and filled by the frame loop, because the key is a
+     property of the offer and not of the layout. It used to read a hardcoded E,
+     which was true of the two helm prompts and false of everything added after
+     them. See the comment on the prompt block in src/main.js. -->
+<div id="prompt" hidden><kbd id="promptKey" hidden></kbd><span id="promptText"></span></div>
 <div id="objective" hidden>
   <b id="objectiveTitle">Recover deep recorder</b>
   <span id="objectiveDetail">Descend to the wreck and leave through the hatch</span>
 </div>
 
-<!-- The wrist unit. Only while outside the hull: a bearing to the trunk, the
-     range to it, and how much of the canister is left. Visibility is 21 m and
-     the ocean is featureless, so without the bearing the boat is gone. -->
+<!-- The wrist unit. Only while outside the hull: a bearing to the trunk, and
+     how much of the canister is left. Visibility is 21 m and the ocean is
+     featureless, so without the bearing the boat is gone.
+
+     Bearing but NO RANGE, and the absence is the mechanic rather than an
+     omission. The project's rule is "direction is light, distance is sound",
+     and a metre count here quietly broke the second half of it: the pinger
+     already carries range by repetition rate, and the pinger is the one
+     instrument the canyon can lie to. Printing the true range beside it made
+     the lie unhearable, which cost the acoustic mimic its entire purpose.
+
+     It also completes a pair. The objective readout gives the recorder's range
+     and withholds its bearing, so it has to be searched for; the wrist gives
+     the boat's bearing and withholds its range, so the way home has to be
+     listened for. Each instrument answers exactly one of the two questions. -->
 <div id="exo" hidden>
   <svg id="exoArrow" viewBox="0 0 24 24" aria-hidden="true">
     <path d="M12 1.6 L19 21 L12 16.6 L5 21 Z"/>
   </svg>
-  <div><span class="lab">Boat</span><br><b id="exoRange">0</b> m</div>
-  <div><span class="lab">Bearing</span><br><b id="exoBrg">000</b>&deg;</div>
+  <div><span class="lab">Boat</span><br><b id="exoBrg">000</b>&deg;</div>
   <div id="exoScrub"><span class="lab">Scrubber</span><br><b id="exoPct">100</b>% ·
     <b id="exoMin">0.0</b> min</div>
 </div>
@@ -202,7 +221,6 @@
     <span><kbd>shift</kbd> transit</span>
     <span><kbd>L</kbd> lamp</span>
     <span><kbd>M</kbd> mute</span>
-    <span><kbd>[</kbd> <kbd>]</kbd> dive band</span>
     <span><kbd>esc</kbd> release cursor</span>
   </div>
   <div id="bootProg">initialising</div>

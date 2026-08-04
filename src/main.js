@@ -16,6 +16,7 @@ import { Life } from './life.js';
 import { FS_VERT, WATER } from './glsl.js';
 import { LampShadow, castsShadow } from './shadow.js';
 import { AcousticMimic } from './creatures.js';
+import { Siphonophore } from './siphonophore.js';
 import { DeepRecorder, CARRY_EFFORT, INTERACT_RANGE } from './recorder.js';
 
 const qs = new URLSearchParams(location.search);
@@ -72,6 +73,17 @@ class Env {
      * lens is nearly three times lower than the point-source version — which was
      * the entire purpose of adding r0. */
     this.lampInt = 900;
+    /* The square of the lamp's effective source radius, in m² — the finite-lens
+     * term that caps the 1/d² hotspot where the beam meets a nearby surface.
+     * One owner here; every surface material reads it as uLampR0. A judgement
+     * call like scatterGain, and set by measurement rather than argument: swept
+     * at 6 / 20 / 40 on the floor pose at real GPU quality. At 6 the pool under
+     * the lamp clipped to flat white over 6.2% of the frame with no ripple
+     * texture surviving; at 40 the texture was total but the frame went flat —
+     * the "heavy bloom, few light sources" accent died. 20 keeps a hot core of
+     * 0.9% with the seabed ripple readable across the rest of the pool, and
+     * costs the mid-range (6 m) 1.2 dB, which the frames absorb. */
+    this.lampR0 = 20.0;
     /* A wider cone, because a narrow one is not atmospheric, it is unusable.
      * At 32 degrees the lit pool covered a fraction of the frame and everything
      * around it was black — the player reasonably reported not being able to see.
@@ -109,6 +121,7 @@ class Env {
     if (u.uLampDir) u.uLampDir.value.copy(this.lampDir);
     if (u.uLampCol) u.uLampCol.value.copy(this.lampCol);
     if (u.uLampInt) u.uLampInt.value = this.lampInt;
+    if (u.uLampR0) u.uLampR0.value = this.lampR0;
     if (u.uLampCos) u.uLampCos.value = this.lampCos;
     if (u.uLampSoft) u.uLampSoft.value = this.lampSoft;
     if (u.uPointCount) {
@@ -288,6 +301,7 @@ pilot.toggleLamp = () => { game.lampOn = game.lampOn > 0.5 ? 0 : 1; syncWater();
  * flags: walking the boat, sitting at the helm, and swimming outside. */
 function enterWalk() {
   game.mode = 'walk';
+  game.review = false;
   pilot.walk = true;
   /* Hand the pilot the hull's frame. From here `pilot.pos` is in hull metres,
    * which is what lets the deck move under the player's feet. */
@@ -304,6 +318,7 @@ function enterWalk() {
 }
 function enterHelm() {
   game.mode = 'helm';
+  game.review = false;
   pilot.walk = false;
   /* Seated, and the difference from before is that the controls are live.
    * Look is free; W/S/A/D and Space/C now reach the vessel rather than the
@@ -334,6 +349,7 @@ function nearHatch() {
 }
 function enterSwim() {
   game.mode = 'swim';
+  game.review = false;
   pilot.walk = false;
   pilot.enabled = true;
   /* Leaving the frame means converting out of it, both position and heading.
@@ -348,10 +364,30 @@ function enterSwim() {
 }
 /** Hull-local point of the conning trunk's lip, where you climb in and out. */
 const TRUNK = new THREE.Vector3(HATCH.x, 3.0, HATCH.z);
+
+/* The player's eye in WORLD space, whatever mode they are in.
+ *
+ * `pilot.pos` is not that, and the difference is a trap that has already been
+ * sprung twice. While walking, `pos` is hull-*local* — `controls.js` says so and
+ * relies on it — so a world distance taken against it is nonsense. Measured:
+ * standing in the boat, `hatchRange()` computed from `pilot.pos` returned
+ * **388.9 m** for a hatch three metres away, and the F3 panel's recorder range
+ * read **391 m** against a true 132.
+ *
+ * The camera is the one thing that is world-space in every mode, because
+ * `Pilot.apply()` is what composes the hull frame out. So every world distance
+ * goes through here, and `pilot.pos` is reserved for the hull-local tests that
+ * genuinely want it (`nearHatch`, the helm proximity check).
+ *
+ * Returned by reference deliberately: nothing downstream mutates it, and this
+ * is called several times a frame. */
+const eyeWorld = () => camera.position;
+
 /** Distance from the swimmer to that lip, in metres. */
 function hatchRange() {
-  return pilot.pos.distanceTo(vessel.toWorld(TRUNK, new THREE.Vector3()));
+  return eyeWorld().distanceTo(vessel.toWorld(TRUNK, _trunkW));
 }
+const _trunkW = new THREE.Vector3();
 pilot.toggleMode = () => {
   /* Coming back aboard, and it now requires being *at* the hatch.
    *
@@ -448,7 +484,10 @@ const siteHash = (x, z) => {
 };
 const kelpAccept = (x, z) => siteHash(x, z) < Math.pow(lightAt(x, z), 0.85);
 const kelp = buildKelp(950, 150, CAM_SPOTS, undefined, kelpAccept, { x: 430, z: 0 });
-const rocks = buildRocks(520, 420, CAM_SPOTS);
+/* The field and its collision come out of one call, so the capsules cannot
+ * drift out of agreement with the instances they stand for. */
+const rockField = buildRocks(520, 420, CAM_SPOTS);
+const rocks = rockField.mesh;
 const snow = buildSnow();
 
 /* Benthic cover, in three bands. See src/flora.js for why the canyon floor gets
@@ -554,6 +593,10 @@ scene.add(ext.mesh);
  * when sound is disabled, so muting the game cannot despawn a rule of the world. */
 const mimic = new AcousticMimic(env);
 scene.add(mimic.root);
+/* The colony. It does not react to the player, so unlike the mimic it takes no
+ * lamp, no learning and no disturbance — time and position are its whole diet. */
+const colony = new Siphonophore(env);
+scene.add(colony.root);
 
 /* The target sits beyond the wreck, far enough from the launch point that the
  * swimmer cannot treat it as a hatch tutorial. Its height comes from the same
@@ -574,7 +617,9 @@ let propAngle = 0;
 const boatCapA = new THREE.Vector3();
 const boatCapB = new THREE.Vector3();
 const boatBlocker = { k: 'cap', a: [0, 0, 0], b: [0, 0, 0], r: HULL_R + 0.35 };
-pilot.blockers = [boatBlocker, ...station.blockers, ...sub.blockers];
+/* Boulders included since the collision pass: ~200 capsules for the large
+ * tail of the field. Scree stays open — see rockBlockers in props.js. */
+pilot.blockers = [boatBlocker, ...station.blockers, ...sub.blockers, ...rockField.blockers];
 
 const beaconSpecs = [
   { pos: [ 34, -390, -12], col: [220, 300, 330], size: 0.55 },
@@ -832,6 +877,11 @@ function applyPose(name) {
   // poses drift by one frame of player input.
   pilot.setFrom(new THREE.Vector3(p.x, y, p.z), p.yaw, p.pitch, 0);
   game.lampOn = p.lamp;
+  /* Before syncWater, not after. setFrom has just zeroed the band, and
+   * `env.surfaceY` is only re-derived by the frame loop — so without this the
+   * depth below is computed against the *previous* shot's surface. See
+   * syncSurface. */
+  syncSurface();
   syncWater();
   // Snap, do not ease. A review frame must not depend on how long the harness
   // happened to wait for the adaptation to finish.
@@ -876,6 +926,29 @@ function setDepthBand(metres) {
    * which is the only state normal play should ever be in; the harness only ever
    * asks for *more* water overhead, never less. */
   pilot.band = pilot.bandTarget = Math.max(0, metres + camera.position.y - SEA_LEVEL);
+  syncSurface();
+}
+
+/* Where the sea surface is, derived from the band. The ONE owner.
+ *
+ * This was written inline in the frame loop and in setDepthBand, and the frame
+ * loop's copy was the only one that ran during normal play — so `env.surfaceY`
+ * was correct exactly once per frame and stale for anything that happened in
+ * between. `applyPose` is precisely such an in-between: it sets the band to 0,
+ * then immediately calls syncWater() and snaps the exposure, both of which read
+ * `env.surfaceY` — still holding whatever the *previous* shot left there.
+ *
+ * Measured: in a survey, `k-d4000` leaves the surface 3616 m up, and the next
+ * pose then computes its depth as 3621 m instead of 45 and snaps the exposure
+ * to the ceiling for a frame that is actually on the shelf. `readStats` runs
+ * later, once the loop has corrected the surface, so the log says 44.96 m while
+ * the picture was metered for the abyss — the number and the frame disagreeing,
+ * with nothing to show for it but a brighter shot.
+ *
+ * This is the `band -410` entry in the ledger recurring, and the lesson it
+ * already states applies unchanged: when a value can be *set* instead of
+ * derived, it needs one owner and everything that reads it must go through it. */
+function syncSurface() {
   env.surfaceY = SEA_LEVEL + pilot.band;
 }
 
@@ -928,7 +1001,7 @@ function adaptExposure(dt, snap = false) {
    * meter integrates — a bright pool over maybe a tenth of the image. Set to the
    * peak instead, this closed down until the deep scenes were unreadable; set
    * near zero it opened up until the pool clipped. */
-  lum += game.lampOn * 0.075;
+  lum += game.lampOn * game.lampMeter;
   /* Pinned at the ceiling below about 150 m, and that is correct rather than a
    * failure. Past the photic zone the only light is a constant bio floor, so
    * the right exposure is constant too — the meter is saturating because the
@@ -999,8 +1072,23 @@ function resize() {
 const game = {
   started: false,
   uiOff: false,
-  depth: qNum('depth', 62),
+  /* True only while a review camera stands detached from the player. The mode
+   * machine is deliberately untouched by review poses, so this flag exists for
+   * the diagnostics to stop reporting `mode walk` from outside the boat. */
+  review: false,
+  /* Overwritten by syncWater() on the first frame — depth is derived from where
+   * the camera is, never stored. The seed value only has to be finite.
+   *
+   * It used to read `qNum('depth', 62)`, which made this look like the owner of
+   * the `?depth=` parameter while the real handler sits at the bottom of the
+   * file behind the `auto=1` gate, with a *different* default of 38. Two
+   * defaults for one parameter, neither of which survives a frame. */
+  depth: 62,
   lampOn: qNum('lamp', 0.0),
+  /* The lamp's average contribution to the exposure meter — a bright pool over
+   * maybe a tenth of the image. See adaptExposure for why it is neither the
+   * peak nor zero. A field rather than a literal so the harness can sweep it. */
+  lampMeter: 0.075,
   maxDpr: qNum('dpr', 2),
   mode: 'walk',
   zone: '', pressure: 1,
@@ -1027,6 +1115,7 @@ const game = {
    * overlay, so the vignette a frame shows is the one a player would get. */
   life: () => life,
   creature: () => mimic,
+  colony: () => colony,
   recorder: () => recorder,
   pose: (n) => { applyPose(n); },
   /* Put the camera at a named station inside the boat.
@@ -1041,6 +1130,7 @@ const game = {
     enterWalk();
     pilot.pos.set(p.x, DECK_Y + EYE, p.z);
     pilot.setFrom(pilot.pos.clone(), p.yaw, p.pitch);
+    syncSurface();
     syncWater();
     adaptExposure(0, true);
   },
@@ -1052,6 +1142,7 @@ const game = {
    * same reason every other camera in this file is. */
   outside: (deg = 40, dist = 17, h = 2.5) => {
     pilot.frame = null; pilot.walk = false; pilot.enabled = false;
+    game.review = true;
     const a = deg * Math.PI / 180;
     const px = vessel.pos.x + Math.sin(a) * dist;
     const pz = vessel.pos.z + Math.cos(a) * dist;
@@ -1059,6 +1150,7 @@ const game = {
     pilot.setFrom(new THREE.Vector3(px, vessel.pos.y + h, pz),
       Math.atan2(dx, -dz) * 180 / Math.PI, -6);
     game.lampOn = 1;
+    syncSurface();
     syncWater();
     adaptExposure(0, true);
   },
@@ -1095,7 +1187,15 @@ const game = {
       station: station.mesh, sub: sub.mesh, boat: boat.mesh, hull: ext.mesh,
       // The trunk strobe. A new light in the scene is a suspect in any exposure
       // question, and a suspect you cannot switch off cannot be cleared.
-      boatbeacon: boatBeacon }[name];
+      boatbeacon: boatBeacon,
+      /* The MESH, not the root. Siphonophore.update rewrites root.visible from
+       * presence every frame, so a toggle on the root lasts sixteen
+       * milliseconds — the same latch bug the hud toggle documents. The mesh's
+       * flag is nobody else's, so it holds. A new light in the scene is a
+       * suspect in any exposure question, and the survey turns this one off
+       * for determinism: it roams, and a review frame it wandered into could
+       * never be compared with anything. */
+      colony: colony.mesh }[name];
     if (o) o.visible = on;
     /* "hud" means every scrap of interface, not just the readout.
      *
@@ -1146,7 +1246,7 @@ const game = {
    * a matter of opinion, and the only way to find out which knob did it is to
    * print the knobs. */
   meters: () => ({
-    depth: game.depth, mode: game.mode, lamp: game.lampOn,
+    depth: game.depth, mode: game.review ? 'review' : game.mode, lamp: game.lampOn,
     exposure: post.exposure, band: pilot.band,
     camY: camera.position.y, surfaceY: env.surfaceY,
     vsteps: post.matVol.uniforms.uSteps.value, vscale: post.volScale,
@@ -1228,7 +1328,7 @@ function frame() {
   pilot.update(dt);
   // Absolute surface plus an optional offset. Depth is then purely a function
   // of where the camera is, which is what makes swimming down mean something.
-  env.surfaceY = SEA_LEVEL + pilot.band;
+  syncSurface();
   syncWater();
   adaptExposure(dt);
 
@@ -1319,9 +1419,12 @@ function frame() {
   /* The recorder must be pulled free under exposure, then physically brought
    * home. Holding it raises work rate rather than imposing an arbitrary movement
    * penalty: the scrubber is already the excursion's honest resource. */
-  if (game.mode === 'swim' && pilot.keys.has('KeyE')) recorder.begin(pilot.pos);
+  /* World space, via eyeWorld — see its comment. Identical to `pilot.pos` in
+   * swim mode, which is why this was never wrong in play, and hull-local while
+   * walking, which is why it could not stay. */
+  if (game.mode === 'swim' && pilot.keys.has('KeyE')) recorder.begin(eyeWorld());
   recorder.update(dt, {
-    swimmer: pilot.pos, outside: !aboard,
+    swimmer: eyeWorld(), outside: !aboard,
     holding: game.mode === 'swim' && pilot.keys.has('KeyE'),
   });
   if (aboard) recorder.deliver(true);
@@ -1369,6 +1472,7 @@ function frame() {
     learn: audio.acoustics.mimicLearn,
     disturbance: recorder.disturbance,
   });
+  colony.update(dt, { swimmer: camera.position, outside: !aboard, depth: game.depth });
 
   renderer.info.reset();
 
@@ -1385,26 +1489,45 @@ function frame() {
    *
    * Without this the boat is a set of rooms with no verbs in them: a pilot's seat
    * and a blank wall look identical, and nothing on screen suggests that E exists.
-   * The prompt is the difference between an interior and a place you can use. */
+   * The prompt is the difference between an interior and a place you can use.
+   *
+   * The key belongs to the offer, not to the markup. It was a fixed <kbd>E</kbd>
+   * in index.html, which was true of the first two prompts and a lie for every
+   * one written after: the hatch is V, and those messages had grown a key of
+   * their own to work around a badge that could not change — so the swimmer read
+   * "E | V — BACK INSIDE", two keys in one line, only one of them right. The
+   * ones that agreed with the badge said E twice instead. Four of the six were
+   * wrong or redundant, and each was written *around* the markup rather than
+   * fixing it, which is the tell.
+   *
+   * Carrying the key beside the message makes the badge answerable for itself,
+   * lets the messages go back to being plain verbs, and gives the extraction
+   * readout — a progress report, not an action — no badge at all. */
   const prompt = document.getElementById('prompt');
   const ptext = document.getElementById('promptText');
-  let pmsg = null;
-  if (game.mode === 'helm') pmsg = 'Stand up';
+  const pkbd = document.getElementById('promptKey');
+  let pkey = null, pmsg = null;      // key to press, and what pressing it does
+  if (game.mode === 'helm') { pkey = 'E'; pmsg = 'Stand up'; }
   else if (game.mode === 'walk') {
     const lp = pilot.pos;   // hull-local while walking
-    if (lp.z > HELM.z - 2.4 && Math.abs(lp.x) < 1.1) pmsg = 'Take the helm';
-    else if (nearHatch()) pmsg = 'V — go outside through the hatch';
+    if (lp.z > HELM.z - 2.4 && Math.abs(lp.x) < 1.1) { pkey = 'E'; pmsg = 'Take the helm'; }
+    else if (nearHatch()) { pkey = 'V'; pmsg = 'Go outside through the hatch'; }
   } else if (game.mode === 'swim') {
     /* The same function the action uses, and the same threshold. These were two
      * different rules — the prompt measured nine metres to the hull's centre, the
      * action measured nothing at all — which is how a player learns a control
      * works differently from how it was advertised. */
     const rr = recorder.rangeTo(pilot.pos);
-    if (recorder.phase === 'sealed' && rr <= INTERACT_RANGE) pmsg = 'Hold E — free the recorder';
+    if (recorder.phase === 'sealed' && rr <= INTERACT_RANGE) { pkey = 'E'; pmsg = 'Hold to free the recorder'; }
     else if (recorder.phase === 'extracting') pmsg = `Extracting — ${Math.round(recorder.progress * 100)}%`;
-    else if (hatchRange() < 5.0) pmsg = 'V — back inside';
+    else if (hatchRange() < 5.0) { pkey = 'V'; pmsg = 'Back inside'; }
   }
-  if (pmsg && !game.uiOff) { ptext.textContent = pmsg; prompt.hidden = false; } else prompt.hidden = true;
+  if (pmsg && !game.uiOff) {
+    ptext.textContent = pmsg;
+    pkbd.textContent = pkey || '';
+    pkbd.hidden = !pkey;
+    prompt.hidden = false;
+  } else prompt.hidden = true;
 
   const legend = document.getElementById('legend');
   if (!legend.hidden) {
@@ -1445,21 +1568,30 @@ function frame() {
    * `atan2(dot(d, right), dot(d, fwd))` is the standard reduction and it uses the
    * camera's real basis, imported from controls.js — the same functions the
    * steering test uses, because a bearing written out by hand here would be the
-   * fifth copy of a formula that has already been wrong twice in this project. */
+   * fifth copy of a formula that has already been wrong twice in this project.
+   *
+   * Direction only. The range to the boat used to be printed here as a metre
+   * count, and it was quietly the most damaging line of UI in the project: the
+   * whole excursion design rests on "direction is light, distance is sound",
+   * and distance-as-sound is the channel the acoustic mimic exists to poison.
+   * A true number on the wrist made the false pinger unhearable — the creature
+   * was fully built, gated and measured, and could not do its job, because a
+   * player who glances at their arm has already been told the answer.
+   *
+   * Removing it is the whole fix; nothing was added. The pinger already carries
+   * range honestly, and now that is the only thing that does. */
   const exo = document.getElementById('exo');
   const showExo = !aboard && !game.uiOff && !hud.hidden;
   exo.hidden = !showExo;
   if (showExo) {
     const target = vessel.toWorld(TRUNK, _exoT);
     const d = _exoD.subVectors(target, camera.position);
-    const range = d.length();
     const fwd = headingDir(pilot.yaw, 0, _exoF);
     const rgt = screenRight(fwd, _exoR);
     // Flat bearing: the vertical component is not what "which way is home" means.
     const rel = Math.atan2(d.x * rgt.x + d.z * rgt.z, d.x * fwd.x + d.z * fwd.z);
     document.getElementById('exoArrow').style.transform =
       `rotate(${(rel * 180 / Math.PI).toFixed(1)}deg)`;
-    document.getElementById('exoRange').textContent = range.toFixed(0);
     document.getElementById('exoBrg').textContent =
       String(Math.round(((rel * 180 / Math.PI) + 360) % 360)).padStart(3, '0');
     document.getElementById('exoPct').textContent = (life.remaining * 100).toFixed(0);
@@ -1476,7 +1608,7 @@ function frame() {
   if (!objective.hidden) {
     let title = 'Recover deep recorder';
     let detail = aboard ? 'Descend to the wreck and leave through the hatch'
-      : `Weak transponder · ${recorder.rangeTo(pilot.pos).toFixed(0)} m`;
+      : `Weak transponder · ${recorder.rangeTo(eyeWorld()).toFixed(0)} m`;
     if (recorder.phase === 'extracting') detail = `Releasing clamps · ${Math.round(recorder.progress * 100)}%`;
     if (recorder.carrying) { title = 'Return recorder to the vessel'; detail = `Trunk · ${hatchRange().toFixed(0)} m`; }
     if (recorder.complete) { title = 'Recorder secured'; detail = 'Playback contains a second return signal'; }
@@ -1511,7 +1643,7 @@ function frame() {
     st.textContent = [
       `${game.fps.toFixed(0)} fps   ${W}x${H}   draws ${renderer.info.render.calls}   tris ${(renderer.info.render.triangles / 1000).toFixed(0)}k`,
       `depth ${game.depth.toFixed(1)} m   ${game.zone}   vis ${env.visibility.toFixed(1)} m   ${game.pressure.toFixed(0)} atm`,
-      `mode ${game.mode}   lamp ${game.lampOn.toFixed(2)}   exposure ${post.exposure.toFixed(3)}   band ${pilot.band.toFixed(0)} m`,
+      `mode ${game.review ? 'review' : game.mode}   lamp ${game.lampOn.toFixed(2)}   exposure ${post.exposure.toFixed(3)}   band ${pilot.band.toFixed(0)} m`,
       `sun at eye  ${m.sunAtCam.map((v) => v.toExponential(1)).join('  ')}`,
       `eye  ${p.x.toFixed(0)} ${p.y.toFixed(0)} ${p.z.toFixed(0)}   surface ${env.surfaceY.toFixed(0)}`,
       `boat ${vessel.pos.x.toFixed(0)} ${vessel.pos.y.toFixed(0)} ${vessel.pos.z.toFixed(0)}`
@@ -1527,8 +1659,12 @@ function frame() {
        * no idea why" is answerable from a photograph once the rate is printed:
        * the canister is spent by how hard you swam, not by the clock. */
       life.report() + (aboard ? '   aboard' : `   out, trunk ${hatchRange().toFixed(0)} m`),
+      /* eyeWorld, not pilot.pos. This line read 391 m for a recorder 132 m away
+       * whenever the player was aboard, because `pilot.pos` is hull-local while
+       * walking — a diagnostic panel quietly lying by 259 m, in the one
+       * instrument the method says to photograph rather than describe. */
       `recorder ${recorder.phase}  ${Math.round(recorder.progress * 100)}%`
-        + `  range ${recorder.rangeTo(pilot.pos).toFixed(1)} m`,
+        + `  range ${recorder.rangeTo(eyeWorld()).toFixed(1)} m`,
     ].join('\n');
   }
 }
@@ -1587,6 +1723,10 @@ if (!qs.has('pose')) enterWalk();
  * open. A tool that can desynchronise the world from the player belongs behind
  * the harness flag. */
 if (qs.has('depth') && qStr('auto', '0') === '1') game.setDepth(qNum('depth', 38));
+/* The [ ] depth-band offset is a review instrument, not a player control — the
+ * same reasoning as ?depth= above: anything that can desynchronise the world
+ * from the player belongs behind the harness flag. */
+pilot.reviewBand = qStr('auto', '0') === '1';
 resize();
 
 // Warm the shaders before showing the button. A first frame that takes two

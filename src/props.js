@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { NOISE, WATER } from './glsl.js';
+import { NOISE, WATER, LAMP_ATTEN } from './glsl.js';
 import { seabedHeight } from './terrain.js';
 import { rng, SEEDS } from './rng.js';
 
@@ -28,6 +28,7 @@ const COMMON_UNIFORMS = () => ({
   uLampDir: { value: new THREE.Vector3(0, 0, -1) },
   uLampCol: { value: new THREE.Vector3(1, 0.97, 0.92) },
   uLampInt: { value: 90 },
+  uLampR0: { value: 20 },
   uLampCos: { value: Math.cos(0.42) },
   uLampSoft: { value: 0.30 },
   uTime: { value: 0 },
@@ -212,6 +213,7 @@ export function buildKelp(clumps = 300, radius = 55, clear = [], seed = SEEDS.ke
       ${WATER}
       varying vec3 vW; varying vec3 vN; varying float vUp; varying float vTint;
       uniform vec3 uLampPos, uLampDir, uLampCol; uniform float uLampInt, uLampCos, uLampSoft;
+      ${LAMP_ATTEN}
 
       void main(){
         // Very dark. These exist to block light, not to be looked at.
@@ -222,7 +224,7 @@ export function buildKelp(clumps = 300, radius = 55, clear = [], seed = SEEDS.ke
         float dL  = length(toL);
         vec3  L   = toL / max(dL,1e-4);
         float cone = smoothstep(uLampCos, uLampCos + uLampSoft, dot(-L, normalize(uLampDir)));
-        float atten = uLampInt / (6.0 + dL*dL*1.0);
+        float atten = lampAtten(dL);
         float ndl = abs(dot(vN, L));
         // Thin tissue transmits — a blade lit from behind glows at the edge.
         float trans = pow(max(dot(-vN, L), 0.0), 2.0) * 0.5;
@@ -239,22 +241,74 @@ export function buildKelp(clumps = 300, radius = 55, clear = [], seed = SEEDS.ke
   return m;
 }
 
+/* Slope of the seabed by central difference. Boulders need somewhere to rest:
+ * dropped onto a fifty-degree canyon wall a sphere sits half in the rock and
+ * half in the water and reads as a bug, because nothing in nature balances
+ * there — scree collects at the foot of a face, not on it. Sampling the
+ * gradient and rejecting steep ground is two lines and removes the whole
+ * class of floating-rock artefacts. */
+export const rockSlopeAt = (x, z) => {
+  const e = 2.5;
+  const dx = seabedHeight(x + e, z) - seabedHeight(x - e, z);
+  const dz = seabedHeight(x, z + e) - seabedHeight(x, z - e);
+  return Math.hypot(dx, dz) / (2 * e);
+};
+
+/** Where the boulders stand, as pure arithmetic.
+ *
+ * Split out of buildRocks so `tools/dyn.mjs` can gate the placement rules —
+ * clearance, slope, bedding — without a renderer, exactly as the station's
+ * blockers are gated. The rand() call order is byte-identical to the loop it
+ * replaced, so existing seeds produce the identical field and no committed
+ * frame changes. */
+export function rockPlacements(count = 440, radius = 72, clear = [], seed = SEEDS.rocks) {
+  const rand = rng(seed);
+  const out = [];
+  for (let i = 0; i < count * 3 && out.length < count; i++) {
+    const a = rand() * Math.PI * 2;
+    const r = Math.sqrt(rand()) * radius;
+    const x = Math.cos(a) * r, z = Math.sin(a) * r;
+    // Heavy tail, but capped. The old max of 5.2 m meant one instance in a
+    // hundred was larger than the entire visible range and read as a wall.
+    const s = 0.30 + Math.pow(rand(), 2.8) * 2.3;
+    // Clearance scales with the boulder: a big one has to stand further off.
+    if (blocked(clear.map((c) => ({ ...c, r: c.r + s })), x, z)) continue;
+    // tan(38 deg) ~= 0.78 — beyond that, sediment and boulders slide.
+    if (rockSlopeAt(x, z) > 0.78) continue;
+    out.push({
+      x, z,
+      y: seabedHeight(x, z) - s * 0.30, // bedded in, not resting on
+      sx: s * (0.8 + rand() * 0.5),
+      sy: s * (0.6 + rand() * 0.4),
+      sz: s * (0.8 + rand() * 0.5),
+      yaw: rand() * Math.PI * 2,
+      tint: rand(),
+    });
+  }
+  return out;
+}
+
+/** Collision, derived from the same numbers that placed the geometry.
+ *
+ * A vertical capsule per boulder: radius is 0.78 of the smaller horizontal
+ * scale — the deformed base mesh never pulls inside that fraction of its
+ * axis, so the capsule cannot block open water — and the upper cap reaches
+ * toward the crown. Scree below half a metre of effective radius stays
+ * unblocked: it is bedded 30% into the sediment and the terrain underneath
+ * already stops a swimmer. Rotation about Y never moves a vertical capsule,
+ * so yaw is correctly absent here. */
+export function rockBlockers(placements, minRadius = 0.55) {
+  const out = [];
+  for (const p of placements) {
+    const r = 0.78 * Math.min(p.sx, p.sz);
+    if (r < minRadius) continue;
+    out.push({ k: 'cap', a: [p.x, p.y, p.z], b: [p.x, p.y + Math.max(0, p.sy * 0.85 - r), p.z], r });
+  }
+  return out;
+}
+
 /** Rocks / boulders. Deformed once on the CPU, varied by instance transform. */
 export function buildRocks(count = 440, radius = 72, clear = [], seed = SEEDS.rocks) {
-  /* Boulders need somewhere to rest.
-   *
-   * Dropped onto a fifty-degree canyon wall a sphere sits half in the rock and
-   * half in the water and reads as a bug, because nothing in nature balances
-   * there — scree collects at the foot of a face, not on it. Sampling the
-   * gradient and rejecting steep ground is two lines and removes the whole
-   * class of floating-rock artefacts. */
-  const slopeAt = (x, z) => {
-    const e = 2.5;
-    const dx = seabedHeight(x + e, z) - seabedHeight(x - e, z);
-    const dz = seabedHeight(x, z + e) - seabedHeight(x, z - e);
-    return Math.hypot(dx, dz) / (2 * e);
-  };
-  const rand = rng(seed);
   /* Three base shapes at detail 3, displaced by real 3D noise.
    *
    * The previous version was one icosahedron at detail 2 — 320 triangles — pushed
@@ -292,31 +346,17 @@ export function buildRocks(count = 440, radius = 72, clear = [], seed = SEEDS.ro
   geo.attributes.position = base.attributes.position;
   geo.attributes.normal = base.attributes.normal;
 
+  const placed = rockPlacements(count, radius, clear, seed);
+  count = placed.length;
   const aPos = new Float32Array(count * 3), aScl = new Float32Array(count * 3);
   const aYaw = new Float32Array(count), aTint = new Float32Array(count);
-  let n = 0;
-  for (let i = 0; i < count * 3 && n < count; i++) {
-    const a = rand() * Math.PI * 2;
-    const r = Math.sqrt(rand()) * radius;
-    const x = Math.cos(a) * r, z = Math.sin(a) * r;
-    // Heavy tail, but capped. The old max of 5.2 m meant one instance in a
-    // hundred was larger than the entire visible range and read as a wall.
-    const s = 0.30 + Math.pow(rand(), 2.8) * 2.3;
-    // Clearance scales with the boulder: a big one has to stand further off.
-    if (blocked(clear.map((c) => ({ ...c, r: c.r + s })), x, z)) continue;
-    // tan(38 deg) ~= 0.78 — beyond that, sediment and boulders slide.
-    if (slopeAt(x, z) > 0.78) continue;
-    aPos[n * 3] = x;
-    aPos[n * 3 + 1] = seabedHeight(x, z) - s * 0.30; // bedded in, not resting on
-    aPos[n * 3 + 2] = z;
-    aScl[n * 3] = s * (0.8 + rand() * 0.5);
-    aScl[n * 3 + 1] = s * (0.6 + rand() * 0.4);
-    aScl[n * 3 + 2] = s * (0.8 + rand() * 0.5);
-    aYaw[n] = rand() * Math.PI * 2;
-    aTint[n] = rand();
-    n++;
+  for (let n = 0; n < count; n++) {
+    const p = placed[n];
+    aPos[n * 3] = p.x; aPos[n * 3 + 1] = p.y; aPos[n * 3 + 2] = p.z;
+    aScl[n * 3] = p.sx; aScl[n * 3 + 1] = p.sy; aScl[n * 3 + 2] = p.sz;
+    aYaw[n] = p.yaw;
+    aTint[n] = p.tint;
   }
-  count = n;
   geo.setAttribute('aPos', new THREE.InstancedBufferAttribute(aPos, 3));
   geo.setAttribute('aScl', new THREE.InstancedBufferAttribute(aScl, 3));
   geo.setAttribute('aYaw', new THREE.InstancedBufferAttribute(aYaw, 1));
@@ -342,6 +382,7 @@ export function buildRocks(count = 440, radius = 72, clear = [], seed = SEEDS.ro
       ${WATER}
       varying vec3 vW; varying vec3 vN; varying float vTint;
       uniform vec3 uLampPos, uLampDir, uLampCol; uniform float uLampInt, uLampCos, uLampSoft;
+      ${LAMP_ATTEN}
       uniform float uTime;
 
       void main(){
@@ -382,7 +423,7 @@ export function buildRocks(count = 440, radius = 72, clear = [], seed = SEEDS.ro
         float dL  = length(toL);
         vec3  L   = toL / max(dL,1e-4);
         float cone = smoothstep(uLampCos, uLampCos + uLampSoft, dot(-L, normalize(uLampDir)));
-        float atten = uLampInt / (6.0 + dL*dL*1.0);
+        float atten = lampAtten(dL);
         float ndl = max(dot(nDet, L), 0.0);
         vec3 lit = alb * uLampCol * ndl * atten * cone * lampTransmit(dL);
         vec3 daylight = ambientAt(vW.y);
@@ -398,5 +439,7 @@ export function buildRocks(count = 440, radius = 72, clear = [], seed = SEEDS.ro
   const m = new THREE.Mesh(geo, mat);
   m.frustumCulled = false;
   m.name = 'rocks';
-  return m;
+  /* Same return shape as buildStation: the field and what a swimmer cannot
+   * pass through, derived from one set of numbers. */
+  return { mesh: m, blockers: rockBlockers(placed) };
 }

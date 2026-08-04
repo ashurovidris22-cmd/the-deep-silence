@@ -29,11 +29,19 @@ import { mkdtempSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-/** Where a browser downloaded from the Playwright CDN ends up. */
+/** Where a browser downloaded from the Playwright CDN ends up — plus, on
+ * Windows, the evergreen installs. Edge ships with Windows 11, so the tail of
+ * this list is present on any Windows machine even when nothing was ever
+ * downloaded. Chrome is preferred when it exists only because it matches the
+ * browser the rest of the harness's history was measured against. */
 export const BROWSER_CANDIDATES = [
   process.env.CHROME_PATH,
   '/tmp/cr/chrome-linux/chrome',
   '/tmp/cr/chrome-linux/headless_shell',
+  'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+  'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+  'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+  'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
 ];
 
 function findBrowser() {

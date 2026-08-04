@@ -72,6 +72,7 @@ function creatureMaterial() {
       uScatterGain: { value: 1 }, uAmbientFloor: { value: new THREE.Vector3() },
       uLampPos: { value: new THREE.Vector3() }, uLampDir: { value: new THREE.Vector3(0, 0, -1) },
       uLampCol: { value: new THREE.Vector3(1, 0.97, 0.92) }, uLampInt: { value: 900 },
+      uLampR0: { value: 20 },
       uLampCos: { value: Math.cos(0.74) }, uLampSoft: { value: 0.34 },
       uShadowMap: { value: null }, uLampVP: { value: new THREE.Matrix4() },
       uShadowSize: { value: 1024 }, uShadowTanHalf: { value: Math.tan(0.74) },
@@ -105,7 +106,7 @@ function creatureMaterial() {
         vec3 L=uLampPos-vW; float d=length(L); vec3 ld=L/max(d,0.001);
         float cone=lampCone(-ld);
         float diffuse=clamp((dot(normalize(vN),ld)+0.20)/1.20,0.0,1.0);
-        float light=cone*diffuse*uLampInt/(6.0+d*d)*lampShadow(vW,normalize(vN));
+        float light=cone*diffuse*lampAtten(d)*lampShadow(vW,normalize(vN));
         vec3 lit=uLampCol*light*lampTransmit(d);
         vec3 skin=mix(vec3(0.007,0.010,0.012),vec3(0.020,0.032,0.029),smoothstep(0.25,0.95,vBody));
         skin*=0.72+0.28*sin(vBody*48.0+sin(vBody*13.0));

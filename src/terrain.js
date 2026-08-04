@@ -172,6 +172,7 @@ export function buildTerrain(size = 1200, seg = 480) {
        * default that is only ever wrong when something else has already failed
        * is a trap laid for the next failure. */
       uLampInt: { value: 900 },
+      uLampR0: { value: 20 },
       uLampCos: { value: Math.cos(0.74) },
       uLampSoft: { value: 0.34 },
       /* Overwritten every frame by LampShadow.applyTo. The defaults exist only
@@ -302,7 +303,7 @@ export function buildTerrain(size = 1200, seg = 480) {
          * after the doubled optical path, there was almost nothing. The r0 term
          * flattens that ratio from about forty to one down to something a tone
          * curve can actually hold. */
-        float atten = uLampInt / (6.0 + dL*dL*1.0);
+        float atten = lampAtten(dL);
         // Wrapped diffuse — silt is dusty and has no hard terminator.
         float ndl = pow(clamp((dot(n,L)+0.28)/1.28, 0.0, 1.0), 1.35);
         vec3 lit = alb * uLampCol * ndl * atten * cone * lampTransmit(dL) * lampShadow(vW, n);

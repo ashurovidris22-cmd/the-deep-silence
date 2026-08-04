@@ -506,6 +506,74 @@ export function cabinet(F, x, y, z, w, h, d, s, opts = {}) {
   if (plinth) F.box(x, y - h / 2 - 0.03, z, d * 0.86, 0.06, w * 0.96, 0, I.TRIM, 0.7);
 }
 
+/**
+ * Case front: the construction a box needs to stop being a box.
+ *
+ * The mess table and the galley counter were `sbox` plus a lid, and at two
+ * metres they read as painted crates — the one thing in the accommodation that
+ * still looked unmodelled. This is the fix, and it is deliberately made of
+ * geometry that stands **proud** of the carcass rather than recessed into it.
+ *
+ * That distinction is the finding. `cabinet` above sets its door leaf 12 mm
+ * *back* from the face and its comment calls that shadow line "the single cue
+ * that says this thing opens" — but the carcass is a solid box, so a leaf
+ * inside it is behind the face and cannot be seen at all. What actually reads
+ * on those cabinets is the hinges and the handle, both of which are drawn
+ * outboard of the face. A recess needs a hole to be a recess; without one, only
+ * relief survives. So: stiles, a lipped top edge, handles, a toe board.
+ *
+ * Sizes are chosen against the geometry/shading line this file already states —
+ * at 62 degrees a feature of size s at distance d covers s/d*599 px, so at the
+ * two metres these are viewed from a 40 mm stile is 12 px and a 28 mm handle is
+ * 8 px. Both are above the 1.5 cm threshold, so both are modelled rather than
+ * left to the height field.
+ */
+export function caseFront(F, x, y, z, w, h, d, s, opts = {}) {
+  const { mat = I.LOCK, wear = 0.5, bays = 2, toe = true, lip = true, pulls = true } = opts;
+  const W = F.W;
+  const i = IN(s);
+  const face = x + i * d / 2;
+  const proud = 0.012;                       // stands off the face, so it casts
+
+  // Vertical stiles: one at each end and one between every pair of bays. These
+  // are what break the flat panel into a carcass with doors in it.
+  const edges = [];
+  for (let k = 0; k <= bays; k++) edges.push(z - w / 2 + (w * k) / bays);
+  for (const ez of edges) {
+    W.box(face + i * proud / 2, y, ez, proud, h - 0.06, 0.042, 0, I.TRIM, wear * 0.8);
+  }
+  // Horizontal rail along the bottom of the doors, closing the frame. Without
+  // it the stiles read as three unrelated strips.
+  W.box(face + i * proud / 2, y - h / 2 + 0.055, z, proud, 0.034, w, 0, I.TRIM, wear * 0.9);
+
+  // Door pulls: a D-handle per bay, on the swinging edge. The only part of a
+  // cupboard anyone actually touches, so it wears differently.
+  if (pulls) {
+    for (let k = 0; k < bays; k++) {
+      const bz = z - w / 2 + (w * (k + 0.5)) / bays;
+      const hz = bz + (k % 2 ? -1 : 1) * (w / bays) * 0.32;
+      W.tube(face + i * 0.034, y + h * 0.16, hz, face + i * 0.034, y - h * 0.10, hz,
+        0.012, 6, I.TRIM, 0.28);
+      for (const gy of [y + h * 0.16, y - h * 0.10]) {
+        W.tube(face, gy, hz, face + i * 0.036, gy, hz, 0.009, 5, I.TRIM, 0.35);
+      }
+    }
+  }
+
+  // Lipped top edge. A worktop with a square edge is a slab; 18 mm of downturn
+  // under it is what makes it a fitted counter, and it catches the lamp.
+  if (lip) {
+    W.box(face + i * 0.006, y + h / 2 - 0.012, z, d * 0.10, 0.026, w + 0.012, 0, I.TRIM, wear * 0.7);
+  }
+
+  // Toe board, set back from the face and standing off the deck. The recess is
+  // real here because the board is a separate strip in front of open air, not a
+  // panel buried in a solid.
+  if (toe) {
+    W.box(face - i * 0.048, y - h / 2 + 0.045, z, 0.020, 0.090, w * 0.98, 0, I.TRIM, 0.78);
+  }
+}
+
 /** Open shelving with a retaining bar — nothing stays on a shelf at sea. */
 export function shelf(F, x, y, z, w, d, s, levels = 3, gap = 0.30) {
   const W = F.W;
@@ -972,7 +1040,21 @@ export function midAccommodation(F) {
   {
     const z = -0.75, x = standX(z, S) - S * 0.34;
     F.sbox(x, DECK_Y + 0.36, z, 0.62, 0.72, 1.04, 0, I.LOCK, 0.55);
+    /* The pedestal is a stowage locker, not a leg, so it gets the same case
+     * front as the galley — one bay, because a 1.04 m table does not have two
+     * doors. No lip: the fiddled top below is its own edge treatment and a
+     * second one under it would read as two tops. */
+    caseFront(F, x, DECK_Y + 0.36, z, 1.04, 0.72, 0.62, S, { bays: 1, lip: false, wear: 0.55 });
     W.box(x, DECK_Y + 0.745, z, 0.68, 0.045, 1.10, 0, I.TRIM, 0.5);            // top
+    /* Foot rail across the open side. Every fixed mess table at sea has one,
+     * and it is the detail that stops the pedestal reading as a plinth: it puts
+     * a lit horizontal line in the gap between the deck and the table, which is
+     * exactly where the eye looks for the absence of legs. */
+    W.tube(x - S * 0.36, DECK_Y + 0.17, z - 0.46, x - S * 0.36, DECK_Y + 0.17, z + 0.46,
+      0.016, 6, I.TRIM, 0.42);
+    for (const rz of [z - 0.46, z + 0.46]) {
+      W.tube(x - S * 0.36, DECK_Y + 0.17, rz, x - S * 0.30, DECK_Y + 0.17, rz, 0.012, 5, I.TRIM, 0.5);
+    }
     for (const [ex, ez, sx2, sz2] of [
       [0.34, 0, 0.030, 1.10], [-0.34, 0, 0.030, 1.10],
       [0, 0.55, 0.68, 0.030], [0, -0.55, 0.68, 0.030]]) {
@@ -999,6 +1081,11 @@ export function midAccommodation(F) {
   {
     const z = 1.35, x = standX(z, S) - S * 0.28;
     F.sbox(x, DECK_Y + 0.42, z, 0.56, 0.84, 1.12, 0, I.LOCK, 0.5);
+    /* Two bays of stowage under the counter, and the toe recess a galley needs
+     * so you can stand at the sink. This is the fitting the "reads as a plain
+     * box" complaint was mostly about — it is the largest single object in the
+     * accommodation and it faces the only camera station that stops here. */
+    caseFront(F, x, DECK_Y + 0.42, z, 1.12, 0.84, 0.56, S, { bays: 2, wear: 0.5 });
     W.box(x, DECK_Y + 0.855, z, 0.60, 0.03, 1.16, 0, I.TRIM, 0.35);            // stainless top
     // Sink: a recessed pan, and a swan-neck tap behind it.
     W.box(x, DECK_Y + 0.795, z - 0.24, 0.36, 0.10, 0.40, 0, I.TRIM, 0.3);

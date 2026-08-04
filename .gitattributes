@@ -1,0 +1,14 @@
+# Line endings are LF everywhere, including on Windows checkouts.
+#
+# Not a style preference. `reference/baseline-*.txt` are compared against fresh
+# tool output by `tools/gate.mjs`, and the tools emit LF on every platform — so
+# a CRLF checkout would make every gate report a difference on every line. The
+# gate strips \r defensively for exactly this reason, but the honest fix is for
+# the file on disk to match the file the tool produces.
+#
+# The same argument covers the shaders: GLSL lives inside JS template literals,
+# so a stray \r ends up in the source string handed to the driver.
+* text=auto eol=lf
+
+# Contact sheets and any other capture that gets committed are binary.
+*.png binary

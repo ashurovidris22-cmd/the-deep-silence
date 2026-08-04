@@ -118,7 +118,11 @@ export class Life {
 
   /**
    * @param dt seconds
-   * @param s  { aboard, speed, boost }
+   * @param s  { aboard, speed, effort }
+   *
+   * `effort` is extra metabolic demand in litres of O2 per minute, and it is
+   * what carrying the recovered recorder costs. (This said `boost` for two
+   * passes, which was a parameter nothing ever passed and nothing ever read.)
    *
    * `aboard` is the geometric hull test, not `game.mode` — same gate the cabin's
    * visibility and the sound layer use, because the review cameras sit outside

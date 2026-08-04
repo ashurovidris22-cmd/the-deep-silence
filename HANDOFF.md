@@ -54,14 +54,15 @@ git clone https://github.com/ashurovidris22-cmd/the-deep-silence
 cd the-deep-silence
 python3 -m http.server 8123 &          # the site has no build step
 
-node tools/dyn.mjs                      # arithmetic. No browser, no network.
-node tools/listen.mjs --mode graph      # the audio graph, structurally
+node tools/gate.mjs                     # arithmetic. No browser, no network.
 ```
 
-Those two need **nothing installed** — `tools/vendorlink.mjs` points the bare
-`three` specifier at `vendor/` by itself. Diff their output against
-`reference/baseline-dyn.txt` and `reference/baseline-listen.txt`; those files are
-committed for exactly this reason. Everything should say:
+That needs **nothing installed** — `tools/vendorlink.mjs` points the bare
+`three` specifier at `vendor/` by itself. It runs `dyn.mjs` and
+`listen.mjs --mode graph` and diffs both against `reference/baseline-dyn.txt`
+and `reference/baseline-listen.txt`, which are committed for exactly this
+reason. Run the two by hand when you want to read them; run the gate when you
+want an answer. Everything should say:
 
 ```
 helm agrees with the view, and the compass counts up to starboard
@@ -136,12 +137,14 @@ Do not carry these over as facts; re-test them.
 > not a changelog. `DESIGN-CREATURES.md` is a design conversation that has not been
 > built; read it before touching creatures.
 >
-> **Before changing anything, prove the build is healthy.** Two commands, no
-> install, no network, no browser:
-> `node tools/dyn.mjs` and `node tools/listen.mjs --mode graph`. Diff both against
-> `reference/`. Six lines are the gate — the helm agreeing with the view, the
-> ballast tank at 8 s, the excursion loop closing, a 6.5 dB creak margin, all
-> voices released, no NaNs.
+> **Before changing anything, prove the build is healthy.** One command, no
+> install, no network, no browser: **`node tools/gate.mjs`**. It runs both
+> arithmetic harnesses and diffs them against `reference/`, normalising the two
+> things that have now produced false failures on two separate machines (a
+> stray blank line from `grep -v '^#'`, and the BOM PowerShell's `*>` writes).
+> A gate you do not trust is worse than no gate: on both occasions the first
+> instinct was to go looking in the game, and both times the fault was in the
+> diff.
 >
 > **Section 1b lists what was specific to the previous sandbox** (npm blocked, a
 > hand-fetched Chromium, no GPU). Re-test those rather than believing them; most of
@@ -261,7 +264,9 @@ python3 -m http.server 8123          # serve
 node tools/survey.mjs --w 800 --h 450        # the whole review set, one boot
 node tools/sheet.mjs shots/[a-z]-*.png --out shots/_sheet.png
 node tools/shot.mjs --pairs "name=g.pose('deep');"   # arbitrary expression
+node tools/gate.mjs                  # both harnesses, diffed against reference/
 node tools/dyn.mjs                   # dynamics, as arithmetic. No browser.
+node tools/dyn.mjs --only chain      # one scenario; --only colony, mimic, score, ...
 node tools/listen.mjs --mode graph   # the audio graph builds, structurally
 node tools/listen.mjs --mode render --scene descent   # real samples, needs a browser
 ```
@@ -327,7 +332,7 @@ no renderer dependency for the same reason: the sandbox runs at 1–2 fps with `
 clamped, so eight seconds of wall clock is under a second of simulated time and
 *every* dynamics test has to run as pure maths at a fixed 60 Hz.
 
-**`tools/dyn.mjs` is that rule with a handle on it.** Eight scenarios driving the
+**`tools/dyn.mjs` is that rule with a handle on it.** Seventeen scenarios driving the
 *real* `Vessel` at a fixed 60 Hz — derived constants, the ballast tank, a full
 descent, the telegraph, the blow, the silence on the floor, the descent/ascent
 asymmetry, and a released-voices check. It found two bugs on its first run and
@@ -355,6 +360,10 @@ src/jerlov.js     seawater optics constants, with provenance
 src/acoustics.js  underwater acoustics constants + the state-to-sound map. Pure
 src/audio.js      the synthesiser: owns the AudioContext, decides nothing
 src/life.js       the suit's CO2 scrubber. Pure arithmetic, no imports at all
+src/chain.js      Verlet chains with a measured substep cap. Pure, no imports
+src/creatures.js  the acoustic mimic: reacts to you, and is the only one that does
+src/siphonophore.js  45 m colony on a chain. Drifts; contains no player term
+src/recorder.js   the objective. Extraction is continuous or it is nothing
 src/glsl.js       shared GLSL: noise, the water model, caustics, phase function
 src/loft.js       profile sweeping — the technique that beats stacked primitives
 src/terrain.js    the canyon: shelf, wall, floor. seabedHeight(), lightAt()
@@ -387,6 +396,13 @@ fade the fine bands out with distance or they alias into crawling static.**
 
 ### Two conventions worth not re-deriving
 
+- **`pilot.pos` is hull-local while walking and world while swimming.** This is
+  deliberate — the walking collision is two clamps and no matrix inverse
+  because of it — but it means **no world distance may be taken against
+  `pilot.pos`**. Use `eyeWorld()` in `main.js`, which is the camera, and which
+  is world-space in every mode. Two readouts got this wrong and one of them was
+  the F3 panel, off by 259 m. `nearHatch()` and the helm proximity check are
+  the legitimate hull-local consumers.
 - **`IN(s) = -s`.** `s` is which side a fitting is mounted on, +1 starboard.
   Its working face points at the centreline. Getting this wrong is silent.
 - **Every furniture builder takes a `Fit`,** and `Fit.sbox` emits the mesh and
@@ -626,6 +642,186 @@ is *not* from this pass. Bisected with the new layer toggle — 4982 blown pixel
 with the strobe on, 4983 with it off, and `draws` 30 against 29 confirming the
 toggle bit. It is the pre-existing look of the lamp, and whether it is too hot is
 an art call rather than a defect.
+
+### Added by the first real-GPU pass (machine 4, Windows)
+
+- **A browser with a real GPU can refuse the software-rendering flags outright.**
+  Edge on Windows dies with 0xC0000005 before printing a DevTools endpoint when
+  handed the SwiftShader trio that every previous machine needed. `launch()` in
+  `boot.mjs` retries an "exited early" launch with those flags stripped. The
+  general lesson: flags that exist to survive one environment can be fatal in
+  its opposite, so degrade by retry rather than by detection.
+- **The surface lamp attenuation existed ten times.** `uLampInt / (6 + d²)` was
+  written out in eight files — the exact situation the cone consolidation in
+  `glsl.js` documents, reproduced one shelf lower. Nothing had drifted *yet*.
+  Now `LAMP_ATTEN` with the constant as a uniform owned by `Env.lampR0`, which
+  is also what made the blown-pool sweep possible at all: a literal cannot be
+  swept without ten edits and a shader recompile per guess.
+- **The pool fix is in section 8 item 2**, with the sweep numbers. Headline:
+  `r0` 6 → 20 takes `e-floor` from 6.2% blown to 0.9% and every lamp-lit
+  exterior frame keeps its texture; the arithmetic and audio gates are
+  byte-identical, because a shading constant has no time constant.
+
+### The stale sea surface — `band -410` recurring, and the survey was lying
+
+Found by refusing to accept a frame diff. After the fit-out change four frames
+had moved beyond grain; three were interiors and one, `l-nosnow`, had moved by
+**81** on a mean of 280. Nothing in that pass touched the shelf.
+
+The measurement that cracked it: shooting `l-nosnow` twice *in isolation* gave
+198.0 and 197.9 — agreeing to a tenth. The frame is perfectly deterministic. It
+is only wrong **inside a survey**, which makes it order-dependent state, not a
+regression. And the survey shoots it directly after `k-d4000`.
+
+`applyPose` calls `pilot.setFrom(..., 0)`, which zeroes the band immediately —
+but `env.surfaceY` was derived from the band **only in the frame loop**. So the
+`syncWater()` and `adaptExposure(0, true)` on the next two lines of `applyPose`
+both read the *previous* shot's surface. Measured: after `g.setDepth(4000)`,
+`g.pose('shelf')` computed its depth as **3621 m instead of 45**, and snapped
+the exposure to the ceiling of 6.0 for a frame standing on the shelf.
+
+**And the log said it was fine.** `readStats` runs after the screenshot, by
+which time the loop has corrected the surface, so the survey printed
+`l-nosnow 44.96m` beside a picture metered for the abyss. A wrong number would
+have been caught in one pass; a *right* number beside a wrong picture survived
+every review this project has done, because the instrument and the frame were
+sampled at different times.
+
+Fixed with one owner: `syncSurface()`, called by the frame loop, `setDepthBand`,
+`applyPose`, `inside()` and `outside()`. The proof is that `a-shelf`, `t-turf`
+and `l-nosnow` are the same pose with different layers, and now read 197.9 /
+198.1 / 198.1 where `l-nosnow` alone used to sit at 304. Exactly one frame in
+the set moved; the other 32 are identical.
+
+Two lessons, and the second is new:
+
+- the ledger's own `band -410` rule — *when a value can be set instead of
+  derived, print it beside the thing it should agree with* — was already
+  written down, and this is its third instance. It now also needs: **give it
+  one owner and make every reader go through it.**
+- **an instrument read at a different time from the frame is not an instrument
+  for that frame.** `readStats` was honest about the moment it ran. Sample state
+  in the same expression that sets up the shot, or accept that the two describe
+  different worlds.
+
+Postscript: this also means the `l-nosnow` control — "if the frame looks the
+same with snow off, snow is not earning its cost" — has never actually run.
+Against `a-shelf` at 197.9 it now differs by 0.2, which is a real result and
+wants a look.
+
+### Added by the bug audit
+
+Five findings, four of them defects and one of them the audit's own method
+failing. None was visible in a frame or in a gate, which is the theme.
+
+- **The recorder's four exposed seconds were payable in instalments.** The decay
+  line `progress -= dt*1.8` sat inside `if (phase === 'extracting')`, whose
+  first act is to set the phase to `'sealed'` — so it ran for exactly one frame
+  and never again, and `begin()` does not reset progress. Measured: five
+  separate one-second visits, thirty seconds apart, recovered the box on the
+  fifth. The commitment the entire first objective is built on did not exist.
+  **And the gate passed the whole time**, because it asserted `phase ===
+  'sealed' && progress < 1` — both trivially true one frame into a 4.2 s job. A
+  gate that cannot fail is not testing anything. `--only recorder` now nibbles
+  at the extraction eight times and requires it to fail.
+- **`pilot.pos` is hull-local while walking, and two readouts consumed it as
+  world.** The F3 panel's recorder range read **391 m against a true 132**
+  whenever the player was aboard, and `hatchRange()` returned **388.9 m for a
+  hatch three metres away**. Every call site of `hatchRange` happened to be
+  guarded by a mode check, so only the diagnostic was actually wrong — in the
+  one instrument this project's method tells you to photograph rather than
+  describe. Both now go through `eyeWorld()`, which is the camera, because the
+  camera is the only thing that is world-space in every mode.
+- **The siphonophore existed in exactly one place in the world.** Its path is
+  closed and bounded at ~37 m from where it spawned, and `_spawn` ran once
+  ever, so the animal belonged permanently to the first patch of water the
+  player swam in. Take the boat anywhere else and there is no siphonophore in
+  the game. It re-seeds now, but only beyond 80 m where it is four orders of
+  magnitude under the ambient floor and the move cannot be witnessed.
+- **The colony kept drawing inside the hull for twenty-six seconds.** Its
+  `root.visible` was keyed to the *decayed* reveal rather than to presence, so
+  a 6 s exponential spent almost half a minute rendering a 45 m animal through
+  the bow port of the room that is supposed to be sanctuary — which
+  `colonyPresence`'s own docstring promises it will not do. `creatures.js` had
+  the pattern right; the second creature was written from memory instead of
+  from the first. Found by bisection, not by argument: `draws` 39 against 38
+  with the layer toggled, and `C-fwd` reading 188.6 against 184.2.
+- **Dead code:** `src/cabin.js`, 315 lines, imported by nothing — the
+  predecessor of `interior.js`, left behind when it was replaced. Also
+  `RecorderState.carrier` (assigned null, never set), `life.js`'s docstring
+  promising a `boost` parameter that nothing passes and nothing reads, and two
+  different defaults for `?depth=` in one file.
+
+**The method failure is worth more than any of them.** The first probe written
+to confirm the coordinate bug recomputed `rangeTo(pilot.pos)` itself instead of
+reading what the panel prints — so it reported the bug as still present after
+it was fixed. A test that transcribes the thing it is testing proves only that
+two copies of an expression agree. `controls.js` already carries this lesson
+about the strafe vector; it now has a second instance, in a tool.
+
+### The instrument that cancelled a creature
+
+Not a crash, not a wrong number — every part worked exactly as written. The
+acoustic mimic is the project's best mechanic on paper: it answers the trunk
+pinger, it waits 24 s before its first lie so the player is taught the true
+signal first, it stays silent inside 38 m so panic near the hatch is never
+punished, and it gets *better* over a long excursion. All of it measured, gated
+by `dyn.mjs --only mimic`, and confirmed audible in a render.
+
+And it could not affect a single player, because the wrist unit printed the true
+range to the boat in metres, continuously, while outside. The pinger carries
+range by repetition rate; the mimic corrupts the pinger; the UI answered the
+question for free. Anyone who glanced at their arm was immune, and anyone who
+did not was playing a different game.
+
+The tell was in the project's own documents. The rule is written down in three
+places — *direction is light, distance is sound* — and section 7 justifies the
+wrist unit's **bearing arrow** at length while never mentioning the range beside
+it. The number had no argument behind it; it had arrived as an obvious
+convenience and quietly took the second half of the rule with it.
+
+Fixed by deletion. No new system, no tuning: the metre count is gone from
+`index.html` and `main.js`, and the pinger is now the only thing that says how
+far.
+
+**The lesson is about a class of bug this project had not yet catalogued.** Every
+other entry in this ledger is something that renders wrong, sounds wrong, or
+returns a wrong number, and all of them can be caught by looking or measuring.
+This one made a correct subsystem irrelevant, and no frame, no gate and no
+render would ever have shown it — the only way to see it is to ask *what
+decision does the player actually face*, and notice that the answer was already
+on screen. **When a mechanic is built and does nothing, suspect an instrument
+that answers its question.**
+
+### Added by the siphonophore pass
+
+- **A photophore that fails its own arithmetic.** The colony's whole reveal
+  grammar rests on "bioluminescence carries 38 m against 26 m of visibility" —
+  and the first draft emitted 1.55, which after 38 m of water (e^-6.95) arrives
+  at 1.4e-3: six times *under* the ambient floor, invisible. The claim was in
+  the design file, the constant contradicted it, and only writing the
+  attenuation out caught it. Emission is now derived from the range claim
+  (0.009 / e^-6.95 ≈ 8.4) and the comment shows the derivation.
+- **Range must gate the spawn, not the encounter.** The first presence function
+  used live distance, so swimming toward the colony would have *faded it out* —
+  an animal that vanishes when approached is a ghost, and the design asks for
+  one that does not care. `_spawn` now guarantees birth beyond photophore range
+  and presence ignores distance thereafter.
+- **An argmax over identical crests is decided by floating point.** The gate
+  "the pulse crest travels" failed twice on correct code: first because two
+  samples of a travelling wave between crests are both exactly zero, then
+  because the wave has 5.5 equal crests and which one argmax returns depends on
+  where grid points land. Assert displacement modulo the crest spacing.
+- **A wanderer cannot be in the baseline.** The colony spawns on any deep
+  exterior camera and then drifts, so it is switched off in the survey's PRE
+  block — the trunk strobe's phase-dependence problem, roaming. Its layer
+  toggle points at the *mesh*, because `update()` rewrites the root's
+  visibility every frame (the hud latch lesson, third occurrence).
+- **The naive-integration control earns its place.** `chain.js` splits dt into
+  16.7 ms substeps; the dyn gate drives the same chain once at raw dt 0.1 x 3
+  iterations as a control and measures 16x the constraint error. The design
+  document predicted instability; what it actually does is go *wrong while
+  still rendering*, which is worse, and now there is a number on it.
 
 ### Added by the steering and excursion pass
 
@@ -933,6 +1129,23 @@ punishment, and a way home without a reason is scenery.
   bearing arrow, because a compass bearing is a number you then have to solve
   against your own heading, in the dark, while running out of scrubber.
 
+  **The wrist unit shows the bearing and NOT the range, and that is the whole
+  mechanic rather than an omission.** It used to print the range in metres, and
+  that single line of UI silently disabled the acoustic mimic: the creature
+  exists to poison the distance channel, distance is carried by the pinger, and
+  a true metre count on the player's arm made the lie unhearable. The creature
+  was fully built, gated and measured, and could not do its job. Nothing was
+  added to fix it — the number was deleted, and the rule the design already
+  stated now actually holds.
+
+  It also completes a pair worth keeping intact: the objective readout gives the
+  recorder's *range* and withholds its bearing, so the wreck has to be searched
+  for; the wrist gives the boat's *bearing* and withholds its range, so the way
+  home has to be listened for. Each instrument answers exactly one of the two
+  questions, and the other one costs you something. **Do not add a range to the
+  wrist or a bearing to the objective** without understanding that each deletes
+  a creature or a search.
+
 **She has a score now, and it is capped by measurement.** Asked for as "tense
 music, tastefully", against a sound layer whose entire thesis is that silence is
 the art direction. Three rules keep it honest: it is tuned to the boat (root =
@@ -1022,28 +1235,47 @@ that frame that cannot be right.
 
 ## 8. What to do next, in order
 
-1. **Judge the sound and the frames with a human.** Both have now been *measured*
-   — `tools/listen.mjs --mode render` across six scenes and a 33-frame survey with
-   contact sheets — and the numbers are healthy: no clipping anywhere, the pump's
-   62.5 and 125 Hz peaks are the 100 Hz mains hum and the 121 Hz blade note, the
-   ballast blow peaks at 8 kHz exactly as the Minnaert scaling predicts, and the
-   interior frames still draw 31 calls and 1743k triangles. What no measurement can
-   settle is whether it *sounds* and *looks* right. Put headphones on, and look at
-   `shots/_sheet-world.png` and `shots/_sheet-boat.png`.
-2. **Decide about the lamp's blown pool.** In most exterior frames the seabed under
-   the lamp is pure white over about 1.4% of the frame with 6% near-white. It
-   predates this work and it may be the intended "heavy bloom, few light sources"
-   look — but seen twenty frames at a time it is the most repeated feature in the
-   set, which is exactly the signal the contact sheet exists to give.
+1. **Judge the sound with a human — the frames have now been looked at.** The
+   survey has finally been rendered on a real GPU (machine 4) and *seen*: the
+   catwalk mood frame, the wreck, the furnished compartments and the hull
+   exteriors all read as intended, and the one repeated defect the contact
+   sheet kept flagging (the blown pool) is fixed and closed below. What still
+   has never been judged is the sound through actual headphones —
+   `listen.mjs --mode render` matches machine 3 to four decimals, so the mix
+   is stable, but whether it *sounds* right remains an open human question.
+   Two smaller looks worth a human eye: `E-hullq` is a weak review bearing (the
+   lamp's scatter cone swallows the hull almost entirely at 16 m — arguably
+   honest optics, but the frame reviews nothing), and the helm compartment sits
+   toward the top of its value range (item 7).
+2. **CLOSED — the lamp's blown pool, decided by looking at it on a real GPU.**
+   It was not the intended look: at full quality the pool centre was flat white
+   over 6.2% of `e-floor` with no ripple texture surviving, which reads as
+   overexposure rather than heavy bloom. The cause is the near-field of the
+   surface attenuation `uLampInt / (r0 + d²)`, and the fix was measured rather
+   than argued: `r0` swept at 6 / 20 / 40 on the floor pose. At 40 the texture
+   is total but the frame goes flat; at 20 a hot core of 0.9% keeps the bloom
+   accent while the seabed ripple reads across the rest of the pool, and the
+   mid-range loses only 1.2 dB. Two things came out of the fix:
+   - `r0` had been written out ten times across eight files (the exact drift the
+     cone consolidation in `glsl.js` was built to stop) and is now one fact:
+     `LAMP_ATTEN` in `glsl.js`, valued by `Env.lampR0`, swept live with
+     `g.env.lampR0 = x`.
+   - the exposure meter's lamp weight is `game.lampMeter` now rather than a
+     buried literal, for the same reason. It stays at 0.075 — closing the meter
+     (0.12–0.15) also un-blows the pool but darkens the water around it, and
+     the sweep showed r0 alone gets the texture back without paying that.
+   `reference/baseline-frames.txt` is regenerated; the deliberate deltas are the
+   lamp-pool rows (`e-floor`, `j/k`, `q/r`, `p-bow`, `m-catwalk`).
 3. **The trunk strobe is unproven.** It is positioned, named, toggleable and its
    colour attribute is driven correctly (k = 0.12 dark, 15.12 at full flash, 26.7 px
    at 12 m, and the GL point-size limit is 1023 so it is not being clamped). Whether
    it reads as a light on screen could not be established here, because exposure
-   adaptation and grain both swamp it — see section 4. **Judge it on hardware, and
-   be ready to delete it**: at 21 m visibility a light cannot be the long-range cue
-   anyway, and the wrist unit's bearing arrow is what actually prevents getting
-   lost. The arrow is verified working: bearing 042°, range 45 m, checked against
-   the geometry by hand.
+   adaptation and grain both swamp it — see section 4. **Judge it on hardware**,
+   and note that the case for deleting it is now much weaker than when this item
+   was written: the wrist unit no longer prints a range, so the strobe and the
+   pinger are the only two things that locate the boat, and the strobe is the
+   only *honest* one. The arrow is verified working: bearing 042°, checked
+   against the geometry by hand.
 4. **Judge the new lamp shadow on hardware.** The projector is wired and the
    catwalk occlusion is measured, while the arithmetic and sound gates remain
    identical. Confirm that the moving grating shadow reads naturally at full
@@ -1063,8 +1295,15 @@ that frame that cannot be right.
    - the **acoustic mimic is now implemented**: after 24 seconds beyond 38 m it
      answers at 3063 Hz, copies the trunk cadence imperfectly, and improves over a
      long excursion without ever becoming identical. The arithmetic gate is in
-     `tools/dyn.mjs --only mimic`; the next creature step is the visible anguilliform
-     archetype, not more tuning of the false pinger.
+     `tools/dyn.mjs --only mimic`.
+   - the **siphonophore is now implemented** — `src/chain.js` (the Verlet
+     solver, pure arithmetic) + `src/siphonophore.js` (45 m colony, drifts on a
+     path that contains no player term, photophore wave sized by the
+     BIOLUM_RANGE arithmetic). Gates: `--only chain` and `--only colony`. The
+     survey keeps it switched off for determinism — it roams, so a baseline
+     frame it wandered into could never be diffed; photograph it with
+     `tools/shot.mjs` pairs instead. **The next archetype is the amphipod
+     swarm on a carcass** (DESIGN-CREATURES order of work #4).
 
    The technique is otherwise as previously noted: undulation in the vertex shader,
    Verlet chains for anything trailing, a radial pulse for bells. The scariest
@@ -1080,19 +1319,42 @@ that frame that cannot be right.
    wrist arrow remains reserved for the way home. `node tools/dyn.mjs --only
    recorder` verifies the proximity, hold, interruption and aboard-only return
    gates.
-7. **Interior polish, the known weak spots.** The mess table and the galley
-   counter still read as plain boxes at two metres and want the edge treatment
-   the lockers got. The cabin is lit toward the top of its value range and could
-   stand more darkness between the lamps.
+7. **Interior polish — the two boxes are CLOSED, the lighting is still open.**
+   The mess table and galley counter now carry `caseFront` (fitout.js): stiles,
+   a bottom rail, D-pulls, a lipped top and a toe recess, plus a foot rail on
+   the mess pedestal. The finding worth keeping: `cabinet`'s recessed door leaf
+   is drawn *inside* a solid carcass, so the recess the comment praises is
+   invisible by construction — what actually reads on the cabinets is the
+   hardware standing proud of the face, and `caseFront` is built entirely from
+   proud geometry for that reason. Still open: the cabin is lit toward the top
+   of its value range and could stand more darkness between the lamps.
 
 ### Open, small, and honestly not urgent
 
-- **Boulders have no collision.** There are 500-plus instances and the terrain
-  underneath them already blocks, so swimming through one is possible but rarely
-  noticed. If it becomes annoying, the pattern is in `station.blockers`.
+- **CLOSED — boulders now collide.** `rockPlacements` in `src/props.js` is the
+  placement loop extracted as pure arithmetic (rand order byte-identical, so the
+  field did not move); `rockBlockers` derives ~227 vertical capsules from the
+  large tail of the field (effective radius ≥ 0.55 m) and `buildRocks` returns
+  `{ mesh, blockers }` the way `buildStation` does. Scree stays open on purpose:
+  it is bedded 30% in and the terrain already stops a swimmer. Gate:
+  `node tools/dyn.mjs --only rocks`.
 - **The turf is only just legible** at the shelf camera's height.
-- **`g.outside()` leaves `game.mode` alone,** so the diagnostic panel reports
-  `mode walk` while the review camera is outside the boat. Harness-only cosmetic.
+- **Does marine snow earn its cost?** The `l-nosnow` control exists to answer
+  exactly that and, because of the stale-surface bug above, has never actually
+  run against a comparable frame. It now does: `a-shelf` 197.9 against
+  `l-nosnow` 198.1, a difference of 0.2 on a mean of 198. That is not proof it
+  is worthless — 3400 particles are a near-field composition device and a mean
+  is the wrong statistic for one — but the art direction calls snow "always in
+  frame" and the number says it is nearly absent from it. Look at the two
+  frames side by side before deciding whether to raise the count.
+- **CLOSED — the diagnostics now say `mode review`.** The mode machine is still
+  untouched by review poses; `game.review` is a reporting flag set by
+  `g.outside()` and cleared by all three enter functions, read only by
+  `meters()` and the stats overlay.
+- **CLOSED — the boot card no longer advertises `[` `]`.** The band keys are
+  gated behind `auto=1` in `controls.js` now (`pilot.reviewBand`), for the same
+  reason `?depth=` is: an offset surface desynchronises the world from the
+  player, so it answers only to the harness.
 - **The bed's low rumble does not fade with depth,** by design — Wenz's low band
   is roughly depth-blind while surface agitation is not, which is what takes the
   hiss away over a descent. But the exponential that does the fading has no
@@ -1101,9 +1363,10 @@ that frame that cannot be right.
   shift from direct to diffuse rather than with real panning, which is the honest
   cheap version of the effect and may be enough. If creatures need a direction,
   that is when to reach for `PannerNode`.
-- **The dive-band keys `[` and `]` are still advertised on the boot card** but the
-  band is review-only now and gated behind `auto=1`. Cosmetic, and it predates
-  this pass.
+- (The old bullet here claimed the band was *already* gated behind `auto=1`.
+  It was not — `controls.js` answered the brackets unconditionally, and the
+  boot card was advertising them honestly. The gate now exists; the card line
+  is gone. A handoff describing intent as fact is how this survived two passes.)
 
 **How this user gives feedback, and it is good feedback:** blunt, specific, and
 usually right. They play the build and report what broke. Take the complaint

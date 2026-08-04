@@ -1,8 +1,29 @@
 # Creatures — options, not decisions
 
-**Nothing in this file is built.** It is the record of a design conversation, kept
-in the repository because it will otherwise be lost between sessions. `HANDOFF.md`
-holds what has been decided and measured; this holds what has only been argued.
+**Most of this file is still unbuilt**, and it remains the record of a design
+conversation rather than a plan. `HANDOFF.md` holds what has been decided and
+measured; this holds what has only been argued.
+
+Three things have since crossed over, and where they did the argument here
+survived contact with a measurement — which is the main reason to keep reading
+it. Section 5's acoustic mimic, section 6's first archetype, and section 6's
+**siphonophore** are all in the game now (`src/creatures.js`,
+`src/siphonophore.js`, `src/chain.js`, gated by `tools/dyn.mjs --only mimic |
+creature | chain | colony`). Two corrections earned by building them:
+
+- **Section 2's Verlet warning was right about the failure and wrong about its
+  shape.** A thirty-node chain at `dt` 0.1 does not blow up; it goes quietly
+  slack, which is worse, because wrong geometry still renders. And the fix is
+  not more iterations — it is a substep cap, which also makes the motion
+  frame-rate independent. See `chain.js`.
+- **Section 4's 38 m figure is load-bearing and must be applied, not just
+  quoted.** The colony's first photophore constant was chosen by eye at 1.55
+  and arrives at 38 m attenuated to 1.4e-3 — six times under the ambient
+  floor, i.e. invisible, in the exact creature whose whole design is "arrives
+  as a light". Emission has to be *solved* from the range claim.
+
+The siphonophore is the archetype below that came out closest to its
+description: no head, no AI, one draw call, and the water doing the design.
 
 Where a number appears here it has been checked, because an argument with a number
 in it survives a handoff and an opinion does not.
@@ -155,14 +176,18 @@ the real pinger.
 
 ## 6. Order of work
 
-1. **One archetype, complete.** Anguilliform swimmer: Strouhal-derived tailbeat,
-   trailing Verlet appendages, a photophore line. Prove the pipeline end to end
-   before there is a bestiary.
-2. **Voice and mimicry.** Sound before sight, because the sound layer is finished
-   and the creature does not need to exist yet to be heard.
-3. **Siphonophore.** Second archetype, pure chain, no body — almost free once the
-   Verlet solver exists.
-4. **Swarm.** Instanced, on the carcass.
+1. ~~**One archetype, complete.**~~ **Built.** Anguilliform swimmer: Strouhal-derived
+   tailbeat, a photophore line, lamp-shy. `src/creatures.js`.
+2. ~~**Voice and mimicry.**~~ **Built**, and in the right order — the mimic was
+   audible for a whole pass before it had a body, which is what the "sound before
+   sight" claim was actually asking for.
+3. ~~**Siphonophore.**~~ **Built.** `src/siphonophore.js` on `src/chain.js`. It was
+   indeed almost free once the solver existed: one draw call, thirty vec3
+   uniforms, no CPU per frame beyond the chain itself. The expensive part was
+   neither the solver nor the shader but the two arithmetic mistakes above.
+4. **Swarm.** Instanced, on the carcass. **This is next.** Note that it needs
+   the whale fall to be worth doing — a swarm on nothing is a particle effect —
+   so item 4 and the carcass in section 4's table are really one piece of work.
 
 ---
 

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { NOISE, WATER } from './glsl.js';
+import { NOISE, WATER, LAMP_ATTEN } from './glsl.js';
 import { seabedHeight, lightAt, lightAtDepth, SEA_LEVEL } from './terrain.js';
 import { rng, SEEDS } from './rng.js';
 
@@ -50,6 +50,7 @@ const COMMON_UNIFORMS = () => ({
   uLampDir: { value: new THREE.Vector3(0, 0, -1) },
   uLampCol: { value: new THREE.Vector3(1, 0.97, 0.92) },
   uLampInt: { value: 90 },
+  uLampR0: { value: 20 },
   uLampCos: { value: Math.cos(0.42) },
   uLampSoft: { value: 0.30 },
   uTime: { value: 0 },
@@ -353,6 +354,7 @@ export function buildTurf(clear = [], centre = { x: 403, z: 12 }, radius = 58, s
       ${WATER}
       varying vec3 vW; varying vec3 vN; varying float vUp; varying float vRed; varying float vPh;
       uniform vec3 uLampPos, uLampDir, uLampCol; uniform float uLampInt, uLampCos, uLampSoft;
+      ${LAMP_ATTEN}
       uniform float uTime;
       void main(){
         vec3 green = mix(vec3(0.040,0.068,0.036), vec3(0.070,0.098,0.044), fract(vPh*0.37));
@@ -363,7 +365,7 @@ export function buildTurf(clear = [], centre = { x: 403, z: 12 }, radius = 58, s
         float dL  = length(toL);
         vec3  L   = toL / max(dL,1e-4);
         float cone = smoothstep(uLampCos, uLampCos + uLampSoft, dot(-L, normalize(uLampDir)));
-        float atten = uLampInt / (6.0 + dL*dL);
+        float atten = lampAtten(dL);
         float ndl = abs(dot(vN, L));
         float trans = pow(max(dot(-vN, L), 0.0), 2.0) * 0.55;
         vec3 lit = alb * uLampCol * (ndl + trans) * atten * cone * lampTransmit(dL);
@@ -549,6 +551,7 @@ export function buildPens(clear = [], centre = { x: 20, z: 8 }, radius = 105, si
       varying vec3 vW; varying vec3 vN; varying float vUp; varying float vAcross;
       varying float vPh; varying float vGlow;
       uniform vec3 uLampPos, uLampDir, uLampCol; uniform float uLampInt, uLampCos, uLampSoft;
+      ${LAMP_ATTEN}
       uniform float uTime;
       uniform sampler2D uTex;
       void main(){
@@ -591,7 +594,7 @@ export function buildPens(clear = [], centre = { x: 20, z: 8 }, radius = 105, si
         float dL  = length(toL);
         vec3  L   = toL / max(dL,1e-4);
         float cone = smoothstep(uLampCos, uLampCos + uLampSoft, dot(-L, normalize(uLampDir)));
-        float atten = uLampInt / (6.0 + dL*dL);
+        float atten = lampAtten(dL);
         float ndl = abs(dot(vN, L));
         // Thin tissue: a pinnule lit from behind glows along its whole length.
         float trans = pow(max(dot(-vN, L), 0.0), 1.6) * 0.42;
@@ -729,6 +732,7 @@ export function buildSponges(clear = [], centre = { x: 20, z: 8 }, radius = 105,
       ${WATER}
       varying vec3 vW; varying vec3 vN; varying vec2 vUV; varying float vVar;
       uniform vec3 uLampPos, uLampDir, uLampCol; uniform float uLampInt, uLampCos, uLampSoft;
+      ${LAMP_ATTEN}
       uniform sampler2D uTex;
       void main(){
         float dist = length(cameraPosition - vW);
@@ -756,7 +760,7 @@ export function buildSponges(clear = [], centre = { x: 20, z: 8 }, radius = 105,
         float dL  = length(toL);
         vec3  L   = toL / max(dL,1e-4);
         float cone = smoothstep(uLampCos, uLampCos + uLampSoft, dot(-L, normalize(uLampDir)));
-        float atten = uLampInt / (6.0 + dL*dL);
+        float atten = lampAtten(dL);
         /* Wrapped hard, and a strong transmission term. Silica glass scatters
          * light through itself, so a sponge lit from any direction glows a
          * little on the side away from the lamp — the cue that says this is not
@@ -855,6 +859,7 @@ export function buildWhips(clear = [], centre = { x: 20, z: 8 }, radius = 105, s
       ${WATER}
       varying vec3 vW; varying vec3 vN; varying float vUp; varying float vPh;
       uniform vec3 uLampPos, uLampDir, uLampCol; uniform float uLampInt, uLampCos, uLampSoft;
+      ${LAMP_ATTEN}
       uniform float uTime;
       uniform sampler2D uTex;
       void main(){
@@ -877,7 +882,7 @@ export function buildWhips(clear = [], centre = { x: 20, z: 8 }, radius = 105, s
         float dL  = length(toL);
         vec3  L   = toL / max(dL,1e-4);
         float cone = smoothstep(uLampCos, uLampCos + uLampSoft, dot(-L, normalize(uLampDir)));
-        float atten = uLampInt / (6.0 + dL*dL);
+        float atten = lampAtten(dL);
         float ndl = abs(dot(vN, L));
         vec3 lit = alb * uLampCol * ndl * atten * cone * lampTransmit(dL);
         lit += alb * ambientAt(vW.y) * (0.24 + 0.40*vUp);
